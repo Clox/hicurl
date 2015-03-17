@@ -1,0 +1,386 @@
+<?php
+/**
+ * A class that simplifies URL requests. Rather than working with CURL and its settings directly this
+ * class maks it easy by using simple syntax for the most used settings.
+ * But more importantly this class also allows for easily saving the history of the requests&responses
+ * with their contens/headers.*/
+class Hicurl {
+	/**@var array This is an array of settings which the user can define. They are set either through the
+	 * class-constructor or via settings(). {@see settings()} for more info.*/
+	private $settingsData;
+	
+	/**@var resource Curl Handler*/
+	private $ch;
+	
+	/**@var resource file handler for the history file.*/
+	private $historyFileHandler;
+	
+	/**@param type $settings The same data as can be passed to settings().
+	 * @see settings()*/
+    function __construct($settings=[]) {
+		//Merge default settings with supplied ones.
+		//(the left hand-side of the array-union will not be overwritten by right hand-side)
+		$this->settingsData=$settings+[
+			'maxFruitlessRetries'=>40,
+			'fruitlessPassDelay'=>10,
+			'maxRequestsPerPass'=>100,
+			'flags'=>1|2,
+		];
+		$this->ch=curl_init();
+    }
+	/** @var mixed[] This method is used for changing settings after having constructed an instance. The settings
+	 * passed to this method will be merged with the current settings. To remove a setting, set it to null. Besides
+	 * calling this method the settings can also temporarily be changed during one load-call by passing the settings
+	 * there as an argument, same merge-rules apply.
+	 * @param array|null $settings If this argument is ommited then no settings are changed, and the method only
+	 * returns the current settings.
+	 * Otherwise an array with a combination of the following settings should be passed:<ul>
+	 * <li>'maxFruitlessRetries' int Defaults to 40. Max amount of retries before a load-function gives up. For
+	 *		loadSingle this is simply the number of retries for that url. For loadMulti it is the max number of
+	 *		consecutive retries for the same group of requests.</li>
+	 * <li>'fruitlessPassDelay' int Defaults to 10. Number of seconds that the script should sleep for when for
+	 *		singleLoad a request fails, or for multiLoad a whole group fails.</li>
+	 * <li>'maxRequestsPerPass' int	Defaults to 100. Used for loadMulti(). If the number of urls passed to loadMulti()
+	 *		is less than this value then it will be split into groups at the size of this.</li>
+	 * <li>'cookie'	string If this is set to a path to a file then cookies will be saved to that file, and those cookies
+	 *		will also be sent on each request. Ex: dirname(__FILE__).'/cookie.txt</li>
+	 * <li>'flags' int An int with bit-flags.<ol>
+	 *		<li>First bit (1) Will make load-calls retry requests where response-content is null.</li>
+	 *		<li>Second bit(2) Will make load-calls retry requests where response doesn't end
+	 *			with the closing tag for the html (That is "&lt/html&gt") with possible following whitespace.</li></ol>
+	 * <li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
+	 * <li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
+	 * <li>'history' string
+	 *		Enables saving contents/headers of request&responses in a file for later viewing. The value can be:<ul>
+	 *		<li>a path to a history-file. If it doesn't yet exist it will be created, else it will be appended to.</li>
+	 *		<li>or a path to a directory in which case the path-string should end with a slash (/). In this case a
+	 *		history-file will automatically be created in this directory. This can be useful during multithreading
+	 *		and avoids one thread having to wait for another for writing to the history-file since each thread gets
+	 *		its own if this setting is applied to each thread.</li></ul>
+	 *		Regardless of which alternative is used, compileHistory() is then to be used to finalize the
+	 *		history-writing.
+	 *		For more info on the history-files {See writeHistory()}
+	 *		</li></ul>
+	 * @return array The resulted settings
+	 */
+	public function settings($settings=null) {
+		if (!$settings)
+			return $this->settingsData;
+		if (array_key_exists('history',$settings)) {//if a setting for 'history' is present
+			//if a history-file akready is open and new history-value is null or not same as old
+			if ($this->historyFileHandler&&$settings['history']!=$this->settingsData['history']) {
+				fclose($this->historyFileHandler);//then close old connection
+			}
+			if (!empty($settings['history'])) {//if non empty
+				$this->historyFileHandler=fopen ($settings['history'],'a');//the open/create file
+			}
+		}
+		//merge supplied settings with current settings of instance
+		return $this->settingsData=$settings+$this->settingsData;
+	}
+	
+	/**Function that writes history to the history-file. To determine if this method is to be called, verify if the
+	 * current settings are set to save history by doing something like:<br><samp>
+	 * if (isset($this->historyFileHandler)||!empty($settings['history'])</samp>
+	 * @param string $data
+	 * @param array $settings*/
+	private function writeHistory($data,$settings) {
+		//first determine if there is an open file-handler of the history file which we can use. Check if
+		//$this->historyFileHandler is set and that it doesn't temporarily gets replaced by null or different path
+		//by the settings-argument.
+		if (isset($this->historyFileHandler)
+				&&(!array_key_exists('history', $settings) || $settings['history']==$this->settingsData['history'])) {
+			fwrite($this->historyFileHandler, $data);
+		} else {
+			file_put_contents($settings['history'], $data, FILE_APPEND);
+		}
+	}
+	/**
+	 * @param string $url A URL-string to load
+	 * @param string[] $postvars If this is null then the request is sent as GET. Otherwise an array of postvars where
+	 *		key=key&value=value.
+	 * @param array $tempSettings Optional parameter which is identical. It is identic to that constructor of the class.
+	 *		The current settings of the class will for the duration of this function be merged with this argument.
+	 * @param $historyCustomData mixed Can be any json-friendly data. If $settings['historyDir'] is set then this value
+	 *		will be set as customData in the history file of this request. See $this-history.
+	 * @return array An array in the form of: [
+	 *		['content'] string The content of the reuested url. In case the request had to be retried, this will only
+	 *			contain the final content. Will be set to null if request failed indefinately.
+	 *		['headers'] array The headers of the final content. Will be set to null if request failed indefinately.
+	 *		['historyFileName'] string This will be present if settings['saveDataDir'] is set and will be the filename
+	 *			with path of the generated file.
+	 *		['error'] string In case the request failed indefinately this will be set to a string explaining the error.
+	 * ]*/
+	function loadSingle($url,$postvars,$tempSettings=null,$historyCustomData=null) {
+		$settings=$tempSettings?$tempSettings+$this->settingsData:$this->settingsData;
+		curl_setopt_array($this->ch, $this->generateCurlOptions($url, $postvars));
+		$numRetries=-1;
+		do {
+			if (++$numRetries) {
+				if ($numRetries==$settings['maxFruitlessRetries']) {
+					$content=$headers=null;
+					$output['error']=$validation;
+					break;
+				}
+				sleep($settings['fruitlessPassDelay']);
+			}
+			$content=curl_exec($this->ch);
+			$headers=curl_getinfo($this->ch);
+			$validation=httpLoader::parseAndValidateResult($content,$headers,$settings);
+			if (isset($settings['historyDir'])) {
+				$historyData=[
+					'headers'=>$headers,
+					'content'=>$content
+				];
+				if ($validation!==true) {
+					$historyData['error']=$validation;
+				}
+				$historyFileData[]=$historyData;
+			}
+		} while ($validation!==true);
+		$output=[
+			'content'=>$content,
+			'headers'=>$headers
+		];
+		if (isset($settings['historyDir'])) {
+			$output['historyFile']=createFile($settings['historyDir'],'data','.json',json_encode($historyFileData));
+		}
+		return $output;
+	}
+	
+	private static function parseAndValidateResult(&$content,$headers, $settings) {
+		if (ord($content[0])==0x1f && ord($content[1])==0x8b) {
+			$content=gzdecode($content);
+		}
+		//utf8 is needed to correctly json-decode
+		//can't blindly utf8-encode or data will be corrupted if it already was utf8 encoded.
+		if (strpos($headers['content_type'],'utf-8')===false) {
+			$content=utf8_encode($content);
+		}
+		if ($headers['http_code']==404) {
+			return 'http code 404';
+		}
+		if ($settings['flags']&1&&$content===null) {
+			return 'null content';
+		}
+		if ($settings['flags']&2&&!preg_match("/<\/html>\s*$/",$content)) {	
+			return 'cut off html';
+		}
+		return true;
+	}
+	/**Makes a history-collection of history-files. See httpLoader->settings['historyDir'] for info.
+	 * The result will be a gzipped json-array of histories where each element is the content of a history-file.
+	 * See httpLoader->$history for info.
+	 * This method may be called statically in which case {@param $historyFiles} must be set, or it may be called
+	 * as an instance method where the list of historyFiles will instead be taken from httpLoader->$history.
+	 * @param string|null $saveToFileName If a filepath with filename is passed then the result of this ,ethod will be
+	 *		written to that file.If the file already exists then it will be overwritten. If this is null then no file
+	 *		will be created and the result wil instead be returned by the method.
+	 * @param string[] $historyFiles An array of history-file filenames which only need to be passed if this
+	 *		method is called statically.
+	 * @return bool If @param $filename is set then this returns true on success, otherwise it returns the result.*/
+	static public function compileHistory($saveToFileName,$historyFiles) {
+		if (isset($this)) {//if called as an instance method
+			$historyFiles=$this->history;
+		}
+		//Set memory_limit to a high number or it might be a problem holding all page-contents in memory which is
+		//needed in order to gzip efficiently.
+		$memoryLimit=ini_get('memory_limit');//save old to be able to revert
+		ini_set('memory_limit', '512M');
+		foreach ($historyFiles as $page) {
+			if (!isset($output))
+				$output='[';
+			else
+				$output.=',';
+			$output.=file_get_contents($page['file']);
+		}
+		$output=gzencode($output);
+		ini_set('memory_limit', $memoryLimit);//revert to old
+		if (isset($saveToFileName))
+			file_put_contents($saveToFileName,$output);
+		else
+			return $output;
+		return true;
+	}
+	private function generateCurlOptions($url,$postvars) {
+		$curlOptions=[
+			CURLOPT_URL => $url,
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_SSL_VERIFYPEER => false,
+			CURLINFO_HEADER_OUT => true,
+			//CURLOPT_VERBOSE=>true,
+			//CURLOPT_PROXY=>'127.0.0.1:8888'
+		];
+		if (isset($this->cookie)) {
+			$curlOptions[CURLOPT_COOKIEFILE]=$curlOptions[CURLOPT_COOKIEJAR]=$this->cookie;
+		}
+		if (isset($postvars)) {
+			$curlOptions[CURLOPT_POST]=true;
+			foreach ($postvars as $key => $value) {
+				$params[] = $key . '=' . urlencode($value);
+			}
+			$curlOptions[CURLOPT_POSTFIELDS]=implode('&', $params);
+			if (isset($this->postHeaders)) {
+				$curlOptions[CURLOPT_HTTPHEADER]=$this->postHeaders;//10023
+			}
+		} else if (isset($this->getHeaders)) {
+			$curlOptions[CURLOPT_HTTPHEADER]=$this->getHeaders;//10023
+		}
+	}
+	function loadMulti($urls,$postvars) {
+		if (!is_array($urls)) {
+			$urls=[$urls];
+		}
+		$mh=curl_multi_init();
+		$handles=[];
+		$output=[];
+		$failedIndices=[];
+		$passNumber=0;
+		//if ($flags|8)
+		//	fwrite($logfile,date('H:i:s T ')."Starting to download ".count($urls)." $generalName.\r\n");
+		$numRetries=0;
+		 /** @var int count of how many consecutive retry passes where no pages were successfully downloaded*/
+		do {
+			++$passNumber;
+//			if ($flags|8) {
+//				fwrite($logfile,date('H:i:s T ')."Pass $passNumber start with "
+//						.min([$this->maxRequestsPerPass,count($urls)+count($handles)])." downloads. "
+//						.(count($urls)+count($handles))." requests remaining.\r\n");
+//			}
+			foreach ($urls as $urlIndex=>$url) {
+				if (count($handles)==$this->maxRequestsPerPass)
+					break;
+				$fruitlessRetries=0;
+				$curlOptions=[
+					CURLOPT_URL => $url,
+					CURLOPT_RETURNTRANSFER => true,
+					CURLOPT_FOLLOWLOCATION => true,
+					CURLOPT_SSL_VERIFYPEER => false,
+					//CURLINFO_HEADER_OUT => true,
+					//CURLOPT_VERBOSE=>true,
+					//CURLOPT_PROXY=>'127.0.0.1:8888'
+				];
+				if (isset($this->cookie)) {
+					$curlOptions[CURLOPT_COOKIEFILE]=$curlOptions[CURLOPT_COOKIEJAR]=$this->cookie;
+				}
+				if (isset($postvars)) {
+					$curlOptions[CURLOPT_POST]=true;
+					foreach ($postvars as $key => $value) {
+						$params[] = $key . '=' . urlencode($value);
+					}
+					$curlOptions[CURLOPT_POSTFIELDS]=implode('&', $params);
+					/*
+					$curlOptions[CURLOPT_POSTFIELDS]='';
+					foreach($postvars as $key=>$value) {
+						$curlOptions[CURLOPT_POSTFIELDS] .= $key . "=" . $value . "&";
+					}
+					 */
+					if (isset($this->postHeaders)) {
+						$curlOptions[CURLOPT_HTTPHEADER]=$this->postHeaders;//10023
+					}
+				} else if (isset($this->getHeaders)) {
+					$curlOptions[CURLOPT_HTTPHEADER]=$this->getHeaders;//10023
+				}
+				
+				curl_setopt_array($handles[$urlIndex]=curl_init(), $curlOptions);
+				curl_multi_add_handle($mh, $handles[$urlIndex]);
+				unset ($urls[$urlIndex]);
+			}
+			do {//snippet from http://php.net/manual/en/function.curl-multi-exec.php#113002
+				curl_multi_exec($mh, $running);
+				curl_multi_select($mh);
+			} while ($running > 0);
+
+			foreach ($handles as $key=>$handle) {
+				$content=curl_multi_getcontent($handle);
+				if (ord($content[0])==0x1f && ord($content[1])==0x8b) {
+					$content=gzdecode($content);
+				}
+				$header=curl_getinfo($handle);
+				if (strpos($header['content_type'],'utf-8')===false) {
+					$content=utf8_encode($content);
+				}
+//			$output['responses'][$key][]=
+//				writeLogFile(
+//					json_encode(
+//						[
+//							'content'=>$content,
+//							'headerInfo'=>$header
+//						]
+//					)
+//				,"","swap/");
+//				if (json_last_error())
+//					trigger_error("Error json-encoding downloaded page:".  json_last_error_msg(), E_USER_ERROR);
+				if (($header['http_code']==404&&$reason="http_code 404")
+				||($this->flags&1&&$content===null&&$reason="null content")
+				||($this->flags&2&&!preg_match("/<\/html>\s*$/",$content)&&$reason="cut off HTML")) {	
+					if ($this->flags|8) {
+						$logText="Will have to retry download of <a href=".
+								curl_getinfo($handles[$key],CURLINFO_EFFECTIVE_URL).">({$key})";
+						if (isset($specificNames[$key])) {
+							 if (gettype($specificNames[$key])=="string")
+								$logText.='"'.$specificNames[$key].'"';
+							 else
+								$logText.='"'.$specificNames[$key]["name"].'"';
+						}
+//						fwrite($logfile,date('H:i:s T ')
+//						.$logText."</a> because of $reason.\r\n");
+					}
+					//Will have to retry this request. Remove and re-add the handle in the multihandler to enable that.
+					curl_multi_remove_handle($mh, $handle);
+					curl_multi_add_handle($mh, $handle);
+					++$numRetries;
+				} else {
+					$output['contents'][$key]=$content;
+					$output['headers'][$key]=$header;
+					curl_multi_remove_handle($mh, $handle);
+					curl_close($handle);
+					unset ($handles[$key]);
+					$fruitlessRetries=-1;
+				}
+			}
+			if (++$fruitlessRetries>0) {//if this was a fruitless pass
+				if ($fruitlessRetries==$this->maxFruitlessRetries||!$this->maxFruitlessRetries) {
+//					fwrite($logfile,date('H:i:s T ')."Max amount of download-retries reached for this set."
+//							. "Leaving ".count($handles)." request(s) unfinished.\r\n");
+					foreach ($handles as $handle) {
+						curl_multi_remove_handle($mh, $handle);
+						curl_close($handle);
+					}
+					array_merge($failedIndices,  array_keys($handles));
+					$handles=[];
+					continue;
+				}
+//				if ($this->flags|8)
+//					fwrite($logfile,date('H:i:s T ')."No requests were successful on this download-pass. Sleeping for "
+//						.$fruitlessPassDelay." seconds then trying again.\r\n");
+			   sleep($this->fruitlessPassDelay);
+			}
+		} while (!empty($handles)||!empty($urls));
+//		if ($this->flags|8)
+//			fwrite($logfile,date('H:i:s T ')
+//					."Finished downloading $generalName with $numRetries retry-passes.\r\n");
+		$output['numRetries']=$numRetries;
+		$output['failedIndices']=$failedIndices;
+		return $output;
+	}
+}
+
+/**
+ * Thread-safe filecreation.
+ * @param string $dir Path to directory where the file should be created
+ * @param string $prefix Prefix that will be prepended to the generated filename
+ * @param string $suffix Suffix that will be appended ot the generated filename, commonly fileextension
+ * @param string $content An optional string that will be inserted into the generated file upon creation.
+ * @return string[] An array with a length of 2 where the first element is the path plus the filename of the generated
+ *		file, and the second element is only the filename.
+ */
+function createFile($dir,$prefix='temp',$suffix='.log',$content=NULL) {
+	while (!($handle=@fopen($filepathname=$dir.($filename=$prefix.uniqid().$suffix),'x')));
+	if (isset($content)) {
+		fwrite($handle,$content);
+	}
+	fclose($handle);
+	return [$filepathname,$filename];
+}
