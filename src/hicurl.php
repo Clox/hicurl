@@ -118,29 +118,62 @@ class Hicurl {
 	//"Fake" method that calls loadSingleReal, just like loadSingleStatic does
 	/**This is the heart of Hicurl. It loads a requested url, using specified settings and returns the
 	 * server-response along with some data, and optionally writes all data to a history-file.
+	 * This method has a static method counterpart called loadSingleStatic which works just the same.
 	 * @param string $url A URL-string to load
-	 * @param string[] $postvsars If this is null then the request is sent as GET. Otherwise an array of postvars where
-	 *		key=key&value=value.
-	 * @param array $tempSettings Optional parameter which is identical. It is identic to that constructor of the class.
-	 *		The current settings of the class will for the duration of this function be merged with this argument.
+	 * @param string[] $formdata If this is null then the request is sent as GET. Otherwise it is sent as POST using
+	 *		this array as formdata where key=name and value=value. It may be an empty array in which case the request
+	 *		will stil be sent as POST butwith no formdata.
+	 * @param array $settings Optional parameter of settings that will be merged with the settings of the instance for
+	 *		the duration of this call only.
 	 * @param string $historyName If $settings['history'] has been set so that history is written, this string will
 	 *		be the "name" of this page in the history-viewer.
 	 * @param array $historyCustomData If $settings['history'] has been set so that history is written, the JSON-object
 	 *		of this page in the historydata will have a "customData"-field with the value of this. It should be an
 	 *		associative or indexed array and can contain anything that is JSON-friendly.
 	 * @return array An array in the form of: [
-	 *		['content'] string The content of the reuested url. In case the request had to be retried, this will only
+	 *		['content'] string The content of the requested url. In case the request had to be retried, this will only
 	 *			contain the final content. Will be set to null if request failed indefinately.
 	 *		['headers'] array The headers of the final content. Will be set to null if request failed indefinately.
 	 *		['historyFileName'] string This will be present if settings['saveDataDir'] is set and will be the filename
 	 *			with path of the generated file.
 	 *		['error'] string In case the request failed indefinately this will be set to a string explaining the error.
-	 * ]*/
+	 * ]
+	 * @see loadSingleStatic*/
 	public function loadSingle($url,$formdata=null,$settings=null,$historyName=null,$historyCustomData=null) {
 		if (!$settings)
 			$settings=[];
 		return Hicurl::loadSingleReal($this->curlHandler,$this->historyFileHandler, $url, $formdata,
 				$settings+$this->settingsData,$historyName, $historyCustomData);
+	}
+	//"Fake" method that calls loadSingleReal, just like loadSingle does
+	/**This is the heart of Hicurl. It loads a requested url, using specified settings and returns the
+	 * server-response along with some data, and optionally writes all data to a history-file.
+	 * This method has a instance method counterpart called loadSingle which works just the same.
+	 * @param string $url A URL-string to load
+	 * @param string[] $formdata If this is null then the request is sent as GET. Otherwise it is sent as POST using
+	 *		this array as formdata where key=name and value=value. It may be an empty array in which case the request
+	 *		will stil be sent as POST butwith no formdata.
+	 * @param array $settings Optional parameter of settings that will be merged with the default settings
+	 *		HiCurl::defaultSettings and then used for this reqest.
+	 * @param string $historyName If $settings['history'] has been set so that history is written, this string will
+	 *		be the "name" of this page in the history-viewer.
+	 * @param array $historyCustomData If $settings['history'] has been set so that history is written, the JSON-object
+	 *		of this page in the historydata will have a "customData"-field with the value of this. It should be an
+	 *		associative or indexed array and can contain anything that is JSON-friendly.
+	 * @return array An array in the form of: [
+	 *		['content'] string The content of the requested url. In case the request had to be retried, this will only
+	 *			contain the final content. Will be set to null if request failed indefinately.
+	 *		['headers'] array The headers of the final content. Will be set to null if request failed indefinately.
+	 *		['historyFileName'] string This will be present if settings['saveDataDir'] is set and will be the filename
+	 *			with path of the generated file.
+	 *		['error'] string In case the request failed indefinately this will be set to a string explaining the error.
+	 * * @see loadSingle* ]*/
+	public static function loadSingleStatic($url,$formdata=null,$settings=null,$historyName=null
+			,$historyCustomData=null) {
+		if (!$settings)
+			$settings=[];
+		return Hicurl::loadSingleReal(curl_init(),null, $url, $formdata,$settings+Hicurl::$defaultSettings,$historyName,
+				$historyCustomData);
 	}
 	private static function loadSingleReal($curlHandler,$historyFileHandler,$url,$formdata,$settings
 		,$historyName,$historyCustomData) {
