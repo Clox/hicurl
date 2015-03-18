@@ -10,23 +10,28 @@ class Hicurl {
 	private $settingsData;
 	
 	/**@var resource Curl Handler*/
-	private $ch;
+	private $curlHandler;
 	
 	/**@var resource file handler for the history file.*/
 	private $historyFileHandler;
+	
+	/**@var array Default settings used when creating an instance of calling load-methods statically.
+	 * The default settings are merged with the settings passed to load-method or contructor. The defaults are:<br>
+	 * 'maxFruitlessRetries'=>40,<br>'fruitlessPassDelay'=>10,<br>'maxRequestsPerPass'=>100,<br>'flags'=>1|2*/
+	static public $defaultSettings=[
+		'maxFruitlessRetries'=>40,
+		'fruitlessPassDelay'=>10,
+		'maxRequestsPerPass'=>100,
+		'flags'=>3,
+	];
 	
 	/**@param type $settings The same data as can be passed to settings().
 	 * @see settings()*/
     function __construct($settings=[]) {
 		//Merge default settings with supplied ones.
 		//(the left hand-side of the array-union will not be overwritten by right hand-side)
-		$this->settingsData=$settings+[
-			'maxFruitlessRetries'=>40,
-			'fruitlessPassDelay'=>10,
-			'maxRequestsPerPass'=>100,
-			'flags'=>1|2,
-		];
-		$this->ch=curl_init();
+		$this->settingsData=$settings+Hicurl::$defaultSettings;
+		$this->curlHandler=curl_init();
     }
 	/** @var mixed[] This method is used for changing settings after having constructed an instance. The settings
 	 * passed to this method will be merged with the current settings. To remove a setting, set it to null. Besides
@@ -59,7 +64,7 @@ class Hicurl {
 	 *		its own if this setting is applied to each thread.</li></ul>
 	 *		Regardless of which alternative is used, compileHistory() is then to be used to finalize the
 	 *		history-writing.
-	 *		For more info on the history-files {See writeHistory()}
+	 *		For on the structure of history-files {@see writeHistory()}
 	 *		</li></ul>
 	 * @return array The resulted settings
 	 */
@@ -79,12 +84,26 @@ class Hicurl {
 		return $this->settingsData=$settings+$this->settingsData;
 	}
 	
-	/**Function that writes history to the history-file. To determine if this method is to be called, verify if the
-	 * current settings are set to save history by doing something like:<br><samp>
-	 * if (isset($this->historyFileHandler)||!empty($settings['history'])</samp>
-	 * @param string $data
+	/**Function that writes history to the uncompiled history-file.
+	 * History-files are "uncompiled" when they're being written to, until compileHistory() has been called on it,
+	 * which finalizes it. In its uncompiled state it is formed like a json-array without the outer brackets. The
+	 * elements are comma-separated json-objects representing "pages". Their structure looks like the following:<pre>
+	 * {	formData:<formData>//this is present if it was a POST-request, and will contain the sent form-data
+	 *		"customData": contains what was passed to customData-parameter of the load method if anything
+	 *		"requestResponsePairs": [//An array of pairs of requests&responses. Usually this will only contain one
+	 *								//element but more will be added for each failed request
+	 *			{
+	 *				"error": this will be present if this request failed, and it will contain a description of the error
+	 *				"content": the content of the page passed from te server
+	 *				"headers": ...and the headers
+	 *			}
+	 *		]
+	 * }
+	 * </pre>
+	 * @param string $data A undecoded page-object, explained in the description of this method.
 	 * @param array $settings*/
 	private function writeHistory($data,$settings) {
+		$data=json_encode($data);
 		//first determine if there is an open file-handler of the history file which we can use. Check if
 		//$this->historyFileHandler is set and that it doesn't temporarily gets replaced by null or different path
 		//by the settings-argument.
@@ -95,14 +114,20 @@ class Hicurl {
 			file_put_contents($settings['history'], $data, FILE_APPEND);
 		}
 	}
-	/**
+	
+	//"Fake" method that calls loadSingleReal, just like loadSingleStatic does
+	/**This is the heart of Hicurl. It loads a requested url, using specified settings and returns the
+	 * server-response along with some data, and optionally writes all data to a history-file.
 	 * @param string $url A URL-string to load
-	 * @param string[] $postvars If this is null then the request is sent as GET. Otherwise an array of postvars where
+	 * @param string[] $postvsars If this is null then the request is sent as GET. Otherwise an array of postvars where
 	 *		key=key&value=value.
 	 * @param array $tempSettings Optional parameter which is identical. It is identic to that constructor of the class.
 	 *		The current settings of the class will for the duration of this function be merged with this argument.
-	 * @param $historyCustomData mixed Can be any json-friendly data. If $settings['historyDir'] is set then this value
-	 *		will be set as customData in the history file of this request. See $this-history.
+	 * @param string $historyName If $settings['history'] has been set so that history is written, this string will
+	 *		be the "name" of this page in the history-viewer.
+	 * @param array $historyCustomData If $settings['history'] has been set so that history is written, the JSON-object
+	 *		of this page in the historydata will have a "customData"-field with the value of this. It should be an
+	 *		associative or indexed array and can contain anything that is JSON-friendly.
 	 * @return array An array in the form of: [
 	 *		['content'] string The content of the reuested url. In case the request had to be retried, this will only
 	 *			contain the final content. Will be set to null if request failed indefinately.
@@ -111,40 +136,51 @@ class Hicurl {
 	 *			with path of the generated file.
 	 *		['error'] string In case the request failed indefinately this will be set to a string explaining the error.
 	 * ]*/
-	function loadSingle($url,$postvars,$tempSettings=null,$historyCustomData=null) {
-		$settings=$tempSettings?$tempSettings+$this->settingsData:$this->settingsData;
-		curl_setopt_array($this->ch, $this->generateCurlOptions($url, $postvars));
+	public function loadSingle($url,$formdata=null,$settings=null,$historyName=null,$historyCustomData=null) {
+		if (!$settings)
+			$settings=[];
+		return Hicurl::loadSingleReal($this->curlHandler,$this->historyFileHandler, $url, $formdata,
+				$settings+$this->settingsData,$historyName, $historyCustomData);
+	}
+	private static function loadSingleReal($curlHandler,$historyFileHandler,$url,$formdata,$settings
+		,$historyName,$historyCustomData) {
+		curl_setopt_array($curlHandler, Hicurl::generateCurlOptions($url, $formdata));
 		$numRetries=-1;
+		if ($historyFileHandler||!empty($settings['history'])) {//should we write history?
+			//see description of writeHistory() for explanation of the history-structure
+			$historyPage=[
+				'formData'=>$postvars,
+				'customData'=>$historyCustomData,
+				'requestResponsePairs'=>[]
+			];
+		}
 		do {
 			if (++$numRetries) {
 				if ($numRetries==$settings['maxFruitlessRetries']) {
 					$content=$headers=null;
-					$output['error']=$validation;
+					$output['error']=$error;
 					break;
 				}
 				sleep($settings['fruitlessPassDelay']);
 			}
-			$content=curl_exec($this->ch);
-			$headers=curl_getinfo($this->ch);
-			$validation=httpLoader::parseAndValidateResult($content,$headers,$settings);
-			if (isset($settings['historyDir'])) {
-				$historyData=[
+			$content=curl_exec($curlHandler);
+			$headers=curl_getinfo($curlHandler);
+			$error=Hicurl::parseAndValidateResult($content,$headers,$settings);
+			if (isset($historyPage)) {//are we writing history-data? this var is only set if we do
+				$historyPage['requestResponsePairs'][]=[
+					'content'=>$content,
 					'headers'=>$headers,
-					'content'=>$content
+					'error'=>$error
 				];
-				if ($validation!==true) {
-					$historyData['error']=$validation;
-				}
-				$historyFileData[]=$historyData;
 			}
-		} while ($validation!==true);
+		} while ($error);
+		if (isset($historyPage)) {//should we write history?
+			Hicurl::writeHistory($historyPage, $settings);
+		}
 		$output=[
 			'content'=>$content,
 			'headers'=>$headers
 		];
-		if (isset($settings['historyDir'])) {
-			$output['historyFile']=createFile($settings['historyDir'],'data','.json',json_encode($historyFileData));
-		}
 		return $output;
 	}
 	
@@ -166,7 +202,7 @@ class Hicurl {
 		if ($settings['flags']&2&&!preg_match("/<\/html>\s*$/",$content)) {	
 			return 'cut off html';
 		}
-		return true;
+		return false;
 	}
 	/**Makes a history-collection of history-files. See httpLoader->settings['historyDir'] for info.
 	 * The result will be a gzipped json-array of histories where each element is the content of a history-file.
@@ -202,7 +238,7 @@ class Hicurl {
 			return $output;
 		return true;
 	}
-	private function generateCurlOptions($url,$postvars) {
+	private static function generateCurlOptions($url,$formdata,$settings) {
 		$curlOptions=[
 			CURLOPT_URL => $url,
 			CURLOPT_RETURNTRANSFER => true,
@@ -212,21 +248,22 @@ class Hicurl {
 			//CURLOPT_VERBOSE=>true,
 			//CURLOPT_PROXY=>'127.0.0.1:8888'
 		];
-		if (isset($this->cookie)) {
-			$curlOptions[CURLOPT_COOKIEFILE]=$curlOptions[CURLOPT_COOKIEJAR]=$this->cookie;
+		if (!empty($settings['cookie'])) {
+			$curlOptions[CURLOPT_COOKIEFILE]=$curlOptions[CURLOPT_COOKIEJAR]=$settings->cookie;
 		}
-		if (isset($postvars)) {
+		if (isset($formdata)) {
 			$curlOptions[CURLOPT_POST]=true;
-			foreach ($postvars as $key => $value) {
+			foreach ($formdata as $key => $value) {
 				$params[] = $key . '=' . urlencode($value);
 			}
 			$curlOptions[CURLOPT_POSTFIELDS]=implode('&', $params);
-			if (isset($this->postHeaders)) {
-				$curlOptions[CURLOPT_HTTPHEADER]=$this->postHeaders;//10023
+			if (!empty($settings['postHeaders'])) {
+				$curlOptions[CURLOPT_HTTPHEADER]=$settings['postHeaders'];//10023
 			}
-		} else if (isset($this->getHeaders)) {
-			$curlOptions[CURLOPT_HTTPHEADER]=$this->getHeaders;//10023
+		} else if (!empty($settings['getHeaders'])) {
+			$curlOptions[CURLOPT_HTTPHEADER]=$settings['getHeaders'];//10023
 		}
+		return $curlOptions;
 	}
 	function loadMulti($urls,$postvars) {
 		if (!is_array($urls)) {
