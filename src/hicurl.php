@@ -12,10 +12,9 @@ class Hicurl {
 	/**@var resource Curl Handler*/
 	private $curlHandler;
 	
-	/**@var resource file handler for the history file.*/
-	private $historyFileHandler;
+	/**@var SplFileObject file-object for the history file.*/
+	private $historyFileObject;
 	
-	private static $historyStructureStart='{"pages":[';
 	/**@var array Default settings used when creating an instance of calling load-methods statically.
 	 * The default settings are merged with the settings passed to load-method or contructor. The defaults are:<br>
 	 * 'maxFruitlessRetries'=>40,<br>'fruitlessPassDelay'=>10,<br>'maxRequestsPerPass'=>100,<br>'flags'=>1|2*/
@@ -73,15 +72,11 @@ class Hicurl {
 		if (!$settings)
 			return $this->settingsData;
 		if (array_key_exists('history',$settings)) {//if a setting for 'history' is present
-			//if a history-file already is open and new history-value is null or not same as old
-			if ($this->historyFileHandler&&$settings['history']!=$this->settingsData['history']) {
-				fclose($this->historyFileHandler);//then close old connection
-			}
-			if (!empty($settings['history'])) {//if non empty
-				$this->historyFileHandler=fopen($settings['history'],'a+');//then open/create file
-				if (!file_exists($settings['history'])||!filesize($settings['history'])) {
-					fwrite($this->historyFileHandler, Hicurl::$historyStructureStart);
-				}
+			if (!$settings['history']) {
+				$this->historyFileObject=null;//then close old connection
+			} else if (!$this->historyFileObject||$settings['history']!=$this->settingsData['history']) {
+				$this->historyFileObject=new SplFileObject($settings['history'],'a+');
+				$this->historyFileObject->historyEmpty=!$this->historyFileObject->getSize();
 			}
 		}
 		//merge supplied settings with current settings of instance
@@ -109,20 +104,24 @@ class Hicurl {
 	 *		]
 	 * }
 	 * </pre>
+	 * @param SplFileObject $historyFileObject
 	 * @param string $data A undecoded page-object, explained in the description of this method.
 	 * @param array $settings*/
-	
-	private static function writeHistory($historyFileHandler,$data,$settings) {
-		$data=json_encode($data).',';
-		if ($historyFileHandler) {
-			fwrite($historyFileHandler, $data);
+	private static function writeHistory($historyFileObject,$data,$settings) {
+		$data=json_encode($data);
+		if (($historyFileObject&&$historyFileObject->historyEmpty)
+			||(!$historyFileObject&&(!file_exists($settings['history'])||!filesize($settings['history'])))) {
+			$data='{"pages":['.$data;
 		} else {
-			if (!file_exists($settings['history'])||!filesize($settings['history'])) {
-				$data=Hicurl::$historyStructureStart.$data;
-			}
+			$data=','.$data;
+		}
+		if ($historyFileObject) {
+			$historyFileObject->fwrite($data);
+		} else {
 			file_put_contents($settings['history'], $data, FILE_APPEND);
 		}
 	}
+	
 	/**This is the heart of Hicurl. It loads a requested url, using specified settings and returns the
 	 * server-response along with some data, and optionally writes all data to a history-file.
 	 * This method has a static method counterpart called loadSingleStatic which works just the same.
@@ -148,13 +147,13 @@ class Hicurl {
 	 * ]
 	 * @see loadSingleStatic*/
 	public function loadSingle($url,$formdata=null,$settings=null,$historyName=[],$historyCustomData=[]) {
-		$historyFileHandler;
-		if ($this->historyFileHandler
+		$historyFileObject;
+		if ($this->historyFileObject
 			&&(!array_key_exists('history', $settings) || $settings['history']==$this->settingsData['history'])) {
-			$historyFileHandler=$this->historyFileHandler;
+			$historyFileObject=$this->historyFileObject;
 		}
 			
-		return Hicurl::loadSingleReal($this->curlHandler,$historyFileHandler, $url, $formdata,
+		return Hicurl::loadSingleReal($this->curlHandler,$historyFileObject, $url, $formdata,
 				($settings?$settings:[])+$this->settingsData,$historyName, $historyCustomData);
 	}
 	/**This is the heart of Hicurl. It loads a requested url, using specified settings and returns the
@@ -183,10 +182,10 @@ class Hicurl {
 	public static function loadSingleStatic($url,$formdata=null,$settings=[],$historyData=[]) {
 		return Hicurl::loadSingleReal(curl_init(),null,$url,$formdata,$settings+Hicurl::$defaultSettings,$historyData);
 	}
-	private static function loadSingleReal($curlHandler,$historyFileHandler,$url,$formdata,$settings,$historyData) {
+	private static function loadSingleReal($curlHandler,$historyFileObject,$url,$formdata,$settings,$historyData) {
 		curl_setopt_array($curlHandler, Hicurl::generateCurlOptions($url, $formdata));
 		$numRetries=-1;
-		if ($historyFileHandler||!empty($settings['history'])) {//should we write history?
+		if ($historyFileObject||!empty($settings['history'])) {//should we write history?
 			//see description of writeHistory() for explanation of the history-structure
 			$historyPage=[
 				'formData'=>$formdata,
@@ -214,7 +213,7 @@ class Hicurl {
 			}
 		} while ($error);//keep looping until $error is false
 		if (isset($historyPage)) {//should we write history?
-			Hicurl::writeHistory($historyFileHandler,$historyPage, $settings);
+			Hicurl::writeHistory($historyFileObject,$historyPage, $settings);
 		}
 		$output=[
 			'content'=>$content,
@@ -244,12 +243,12 @@ class Hicurl {
 		return false;
 	}
 	/**Compiles the history-file. This is to be done when the writing to the history-file is complete.
-	 * This essentialy puts the file in a close state, gzipping it while also optionally adding extra data.
-	 * @param array $customData This can optionally be set to include extra data. It should be an
-	 *		associative or indexed array and can contain anything that is JSON-friendly.
+	 * This essentialy puts the file in a closed state, gzipping it while also optionally adding extra data.
+	 * @param mixed $customData This can optionally be set to include extra data. It can be anything that is
+	 * JSON-friendly and should be undecoded.
 	 * @return bool Returns true for success.*/
 	public function compileHistory($customData) {
-		return Hicurl::compileHistoryReal($this->historyFileHandler, $historyOutput);
+		return Hicurl::compileHistoryReal($this->historyFileObject);
 	}
 	/**Compiles history.
 	 * The data is structured as:<pre>
@@ -259,35 +258,32 @@ class Hicurl {
 	 * }
 	 * </pre>
 	 * 
-	 * @param type $historyInput
+	 * @param SplFileObject $historyInput
 	 * @param type $historyOutput
 	 * @param type $customData
 	 * @return boolean
 	 */
 	private static function compileHistoryReal($historyInput,$historyOutput,$customData) {
+		//at this point the history should look like:
+		//{"pages":[page1,page2
+		$historyInput->fwrite(']');
+		if (isset($customData)) {
+			$historyLength+=$historyInput->fwrite(',"customData":'.json_encode($customData));
+		}
+		$historyInput->fwrite('}');
+		$historyInput->fseek(0,SEEK_END);
+		$historyLength=$historyInput->ftell();//getSize() returns 0 for some reason?
+		$historyInput->rewind();
 		
 		//Set memory_limit to a high number or there might be a problem holding all page-contents in memory which is
 		//needed in order to gzip efficiently.
 		$memoryLimit=ini_get('memory_limit');//save old to be able to revert
 		ini_set('memory_limit', '512M');
 		
-		
-		
-		foreach ($historyFiles as $page) {
-			if (!isset($output))
-				$output='[';
-			else
-				$output.=',';
-			$output.=file_get_contents($page['file']);
-		}
-		$output=gzencode($output);
+		$result=gzencode($historyInput->fread($historyLength));
+		$historyInput->ftruncate(0);
+		$historyInput->fwrite($result);
 		ini_set('memory_limit', $memoryLimit);//revert to old
-		if (isset($saveToFileName))
-			file_put_contents($saveToFileName,$output);
-		else
-			return $output;
-		return true;
-		
 	}
 	private static function generateCurlOptions($url,$formdata,$settings) {
 		$curlOptions=[
@@ -452,6 +448,25 @@ class Hicurl {
 		$output['numRetries']=$numRetries;
 		$output['failedIndices']=$failedIndices;
 		return $output;
+	}
+	public static function echoHistory($filePath) {
+		ini_set('zlib.output_compression','Off');
+		$HTTP_ACCEPT_ENCODING = $_SERVER["HTTP_ACCEPT_ENCODING"]; 
+		header('Cache-Control: max-age=29030400, public');
+		if(headers_sent()) 
+			$encoding = false; 
+		else if(strpos($HTTP_ACCEPT_ENCODING, 'x-gzip') !== false) 
+			$encoding = 'x-gzip'; 
+		else if(strpos($HTTP_ACCEPT_ENCODING,'gzip') !== false)
+			$encoding = 'gzip'; 
+		else
+			$encoding = false;
+		if ($encoding) {
+			header('Content-Encoding: '.$encoding);
+			header('Content-Type: text/plain');
+			readfile($filePath);
+		} else 
+			echo gzdecode (file_get_contents($filePath));
 	}
 }
 
