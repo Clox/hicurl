@@ -1,7 +1,7 @@
 <?php
 /**
  * A class that simplifies URL requests. Rather than working with CURL and its settings directly this
- * class maks it easy by using simple syntax for the most used settings.
+ * class maks it easy by using simple syntax for the most common settings.
  * But more importantly this class also allows for easily saving the history of the requests&responses
  * with their contens/headers.*/
 class Hicurl {
@@ -84,16 +84,15 @@ class Hicurl {
 	}
 	
 	/**Function that writes history to the uncompiled history-file.
-	 * History-files are "uncompiled" when they're being written to, until compileHistory() has been called on it,
-	 * which finalizes it. In its uncompiled state it is formed like a json-array without the closing bracket. The
-	 * elements are comma-separated json-objects representing "pages". All pages, including the last are for simplicity
-	 * followed by commas. Their structure look like the following:<pre>
-	 * {	formData:this is present if it was a POST-request, and will contain the sent form-data
-	 *		,"name":a name-string for the page that will be shown in the history-viwer. Set via historyData>name
+	 * History-files are "uncompiled" when they're being written to, until compileHistory() has been called on it, which
+	 * finalizes it. In its uncompiled state it is formed like a json-array without the outer brackets. The elements are
+	 * json-objects representing "pages", separated by comma+linebreak. Their structure look like the following:<pre>
+	 * {	formData://this is present if it was a POST-request, and will contain the sent form-data
+	 *		,"name"://a name-string for the page that will be shown in the history-viwer. Set via historyData>name
 	 *		,"id": mixed//a unique id may be be set, which can then be used to refer to this page as parent of it
 	 *		,"parentId": mixed//another page may be set as parent by setting its id in historyData>parentId. It will
 	 *			//then show in the tree-view of the history-viewer
-	 *		,"customData": contains what was passed to customData-parameter of the load method if anything
+	 *		,"customData": //contains what was passed to customData-parameter of the load method if anything
 	 *		,"exchanges": [//An array of requests&responses pairs. Usually this will only contain one
 	 *								//element but more will be added for each failed request
 	 *			{
@@ -263,6 +262,7 @@ class Hicurl {
 	 * @param type $customData
 	 * @return boolean
 	 */
+	
 	private static function compileHistoryReal($historyInput,$historyOutput,$customData) {
 		//at this point the history should look like:
 		//{"pages":[page1,page2
@@ -271,19 +271,48 @@ class Hicurl {
 			$historyLength+=$historyInput->fwrite(',"customData":'.json_encode($customData));
 		}
 		$historyInput->fwrite('}');
-		$historyInput->fseek(0,SEEK_END);
-		$historyLength=$historyInput->ftell();//getSize() returns 0 for some reason?
-		$historyInput->rewind();
+		$this->compressHistoryFile($historyInput);
+	}
+	
+	/**Compress input-file with gzip encoding
+	 * @param string $historyFilePath*/
+	private function compressHistoryFile($historyFilePath,$writeToFile=true) {
+		//We want to use system gzip via exec(), and only if that fails fall back on php gzencode()
 		
-		//Set memory_limit to a high number or there might be a problem holding all page-contents in memory which is
-		//needed in order to gzip efficiently.
-		$memoryLimit=ini_get('memory_limit');//save old to be able to revert
-		ini_set('memory_limit', '512M');
-		
-		$result=gzencode($historyInput->fread($historyLength));
-		$historyInput->ftruncate(0);
-		$historyInput->fwrite($result);
-		ini_set('memory_limit', $memoryLimit);//revert to old
+		//is exec() available? also checks whether exec is in ini_get('disable_functions') and whether safemode is on
+		if(function_exists('exec')) {
+			//if system is windows then there is no native gzip-command, which is why we cd into src-folder where
+			//gzip.exe should be located, which will be used in that case. separate commands with ;
+			//--force is for forcing overwrite if output -file already exist
+			$command='cd '.__DIR__.';'
+					.'gzip --force ';
+			if (!$writeToFile)
+				$command.='--stdout ';
+			$command.=$historyFilePath;
+			exec($command, $output, $return_var);
+			if ($return_var!=0) {//success!(0 always mean success)
+				return true;
+			}
+		}
+		if (true) {
+			$historyInput->fseek(0,SEEK_END);
+			$historyLength=$historyInput->ftell();//getSize() returns 0 for some reason?
+			$historyInput->rewind();
+
+			//Set memory_limit to a high number or there might be a problem holding all page-contents in memory which is
+			//needed in order to gzip efficiently.
+			$memoryLimit=ini_get('memory_limit');//save old to be able to revert
+			ini_set('memory_limit', '512M');
+
+			$result=gzencode($historyInput->fread($historyLength));
+			$historyInput->ftruncate(0);
+			$historyInput->fwrite($result);
+			ini_set('memory_limit', $memoryLimit);//revert to old
+		} else if (wingzip) {
+			//use "Gzip for Windows"
+			//http://gnuwin32.sourceforge.net/packages/gzip.htm > Download>Binaries>gzip.exe(only needed file)
+			
+		}
 	}
 	private static function generateCurlOptions($url,$formdata,$settings) {
 		$curlOptions=[
@@ -432,7 +461,7 @@ class Hicurl {
 						curl_multi_remove_handle($mh, $handle);
 						curl_close($handle);
 					}
-					array_merge($failedIndices,  array_keys($handles));
+					array_merge($failedIndices,array_keys($handles));
 					$handles=[];
 					continue;
 				}
@@ -449,13 +478,18 @@ class Hicurl {
 		$output['failedIndices']=$failedIndices;
 		return $output;
 	}
-	public static function echoHistory($filePath) {
+	
+	/**
+	 * 
+	 * @param string $historyPath
+	 */
+	public static function echoHistory($historyPath) {
 		ini_set('zlib.output_compression','Off');
 		$HTTP_ACCEPT_ENCODING = $_SERVER["HTTP_ACCEPT_ENCODING"]; 
 		header('Cache-Control: max-age=29030400, public');
 		if(headers_sent()) 
 			$encoding = false; 
-		else if(strpos($HTTP_ACCEPT_ENCODING, 'x-gzip') !== false) 
+		else if(strpos($HTTP_ACCEPT_ENCODING, 'x-gzip') !== false)
 			$encoding = 'x-gzip'; 
 		else if(strpos($HTTP_ACCEPT_ENCODING,'gzip') !== false)
 			$encoding = 'gzip'; 
@@ -464,9 +498,9 @@ class Hicurl {
 		if ($encoding) {
 			header('Content-Encoding: '.$encoding);
 			header('Content-Type: text/plain');
-			readfile($filePath);
-		} else 
-			echo gzdecode (file_get_contents($filePath));
+			readfile($historyPath);
+		} else
+			echo gzdecode (file_get_contents($historyPath));
 	}
 }
 
