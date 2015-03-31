@@ -72,10 +72,10 @@ class Hicurl {
 		if (!$settings)
 			return $this->settingsData;
 		if (array_key_exists('history',$settings)) {//if a setting for 'history' is present
-			if (!$settings['history']) {
+			if (!$settings['history']) {//if its null/false
 				$this->historyFileObject=null;//then close old connection
 			} else if (!$this->historyFileObject||$settings['history']!=$this->settingsData['history']) {
-				$this->historyFileObject=new SplFileObject($settings['history'],'a+');
+				$this->historyFileObject=new SplFileObject($settings['history'],'c+');
 				$this->historyFileObject->historyEmpty=!$this->historyFileObject->getSize();
 			}
 		}
@@ -84,43 +84,66 @@ class Hicurl {
 	}
 	
 	/**Function that writes history to the uncompiled history-file.
-	 * History-files are "uncompiled" when they're being written to, until compileHistory() has been called on it, which
-	 * finalizes it. In its uncompiled state it is formed like a json-array without the outer brackets. The elements are
-	 * json-objects representing "pages", separated by comma+linebreak. Their structure look like the following:<pre>
-	 * {	formData://this is present if it was a POST-request, and will contain the sent form-data
-	 *		,"name"://a name-string for the page that will be shown in the history-viwer. Set via historyData>name
-	 *		,"id": mixed//a unique id may be be set, which can then be used to refer to this page as parent of it
-	 *		,"parentId": mixed//another page may be set as parent by setting its id in historyData>parentId. It will
-	 *			//then show in the tree-view of the history-viewer
+	 * History-files are "uncompiled" before Hicurl::compileHistory has been called on them, which generates a
+	 * history-file of cosed state.
+	 * In its uncompiled state its structure is as follows:
+	 *		(historyData without closing bracket and brace)+(tempHistoryData)+(sizeOfTempHistoryData)
+	 * historyData is the following json-object: {"pages":[]}
+	 * But in the uncompiled file it is without the closing bracket+brace as stated above. Each element in its
+	 * pages-array is the following:<pre>
+	 * {	"formData"://this is present if it was a POST-request, and will contain the sent form-data
+	 *		,"name"://a name-string for the page that will be shown in the history-viewer. Set via historyData>name
+	 *		,"parentIndex": int//may hold an pointing to an index of another page in the pages-array. This will then be
+	 *			shown in the tree-view of the history-viewer. This is set up with loadSingle>historyData>id/parentId
 	 *		,"customData": //contains what was passed to customData-parameter of the load method if anything
-	 *		,"exchanges": [//An array of requests&responses pairs. Usually this will only contain one
+	 *		,"exchanges": [//An array of request&response pairs. Usually this will only contain one
 	 *								//element but more will be added for each failed request
 	 *			{
-	 *				"error": this will be present if this request failed, and it will contain a description of the error
-	 *				"content": the content of the page passed from te server
+	 *				"error": false if no error, otherwise an explanation of the error
+	 *				"content": the content of the page sent from the server
 	 *				"headers": ...and the headers
 	 *			}
+	 *		...
 	 *		]
 	 * }
 	 * </pre>
 	 * @param SplFileObject $historyFileObject
 	 * @param string $data A undecoded page-object, explained in the description of this method.
-	 * @param array $settings*/
-	private static function writeHistory($historyFileObject,$data,$settings) {
-		$data=json_encode($data);
+	 * @param array $settings
+	 * @param array $historyData*/
+	private static function writeHistory($historyFileObject,$data,$settings,$historyData) {
+		if (!isset($historyFileObject)) {
+			$historyFileObject=new SplFileObject($settings['history'],'c+');
+		}
+		$historyFileObject->flock(LOCK_EX);
 		if (($historyFileObject&&$historyFileObject->historyEmpty)
 			||(!$historyFileObject&&(!file_exists($settings['history'])||!filesize($settings['history'])))) {
-			$data='{"pages":['.$data;
+			$dataPrefix='{"pages":[';
+			$historyFileTempData=['numPages'=>0,'idIndices'=>[]];
 		} else {
-			$data=','.$data;
+			$dataPrefix=',';
+			$tempDataSize=Hicurl::seekHistoryFileTempData($historyFileObject);
+			$historyFileTempData=$historyFileObject->fread($tempDataSize);
+			$historyFileObject->fseek(-4-$tempDataSize, SEEK_END);
 		}
-		if ($historyFileObject) {
-			$historyFileObject->fwrite($data);
-		} else {
-			file_put_contents($settings['history'], $data, FILE_APPEND);
+		if (isset($historyData['id'])) {
+			$historyFileTempData['idIndices'][$historyData['id']]=$historyFileTempData['numPages'];
 		}
+		if (isset($historyData['parentId'])) {
+			$data['parentIndex']=$historyFileTempData['idIndices'][$historyData['parentId']];
+		}
+		++$historyFileTempData['numPages'];
+		$historyFileObject->fwrite($dataPrefix.json_encode($data));
+		$headerSize=$historyFileObject->fwrite($historyFileTempData);
+		$historyFileObject->fwrite(pack('N',$headerSize));
+		$historyFileObject->flock(LOCK_UN);
 	}
-	
+	private static function seekHistoryFileTempData($historyFileObject) {
+		$historyFileObject->fseek(-4, SEEK_END);
+		$tempDataSize=unpack('N',$historyFileObject->fread(4))[1];
+		$historyFileObject->fseek(-4-$tempDataSize, SEEK_END);
+		return $tempDataSize;
+	}
 	/**This is the heart of Hicurl. It loads a requested url, using specified settings and returns the
 	 * server-response along with some data, and optionally writes all data to a history-file.
 	 * This method has a static method counterpart called loadSingleStatic which works just the same.
@@ -164,8 +187,8 @@ class Hicurl {
 	 *		will stil be sent as POST butwith no formdata.
 	 * @param array $settings Optional parameter of settings that will be merged with the default settings
 	 *		HiCurl::defaultSettings and then used for this reqest. {@see settings()}
-	 * @param array $historyData Associative array for various settings used for the history-writing in case
-	 *		settings['history'] is set. The following are valid settings for it:<pre>[
+	 * @param array $historyData Associative array for various settings used for the history-writing.
+	 *		This is only used if settings['history'] is set. The following are valid settings for it:<pre>[
 	 *			'name'=> string//a name for the historypage that will be visible in the history-viewer
 	 *			,'id'=> mixed//a id may be set here which then can be used to refer to this page as a parent of another
 	 *			,'parentId'=> mixed//the id of another page may be set here to refer to it as the parent of this page
@@ -212,7 +235,7 @@ class Hicurl {
 			}
 		} while ($error);//keep looping until $error is false
 		if (isset($historyPage)) {//should we write history?
-			Hicurl::writeHistory($historyFileObject,$historyPage, $settings);
+			Hicurl::writeHistory($historyFileObject, $historyPage, $settings, $historyData);
 		}
 		$output=[
 			'content'=>$content,
@@ -241,15 +264,9 @@ class Hicurl {
 		}
 		return false;
 	}
+	
 	/**Compiles the history-file. This is to be done when the writing to the history-file is complete.
 	 * This essentialy puts the file in a closed state, gzipping it while also optionally adding extra data.
-	 * @param mixed $customData This can optionally be set to include extra data. It can be anything that is
-	 * JSON-friendly and should be undecoded.
-	 * @return bool Returns true for success.*/
-	public function compileHistory($customData) {
-		return Hicurl::compileHistoryReal($this->historyFileObject);
-	}
-	/**Compiles history.
 	 * The data is structured as:<pre>
 	 * {//<-outermost object
 	 *		"customData":array//customData
@@ -257,62 +274,74 @@ class Hicurl {
 	 * }
 	 * </pre>
 	 * 
-	 * @param SplFileObject $historyInput
+	 * @param type $historyOutput
+	 * @param type $customData
+	 * @return boolean*/
+	public function compileHistory($historyOutput=null,$customData=null) {
+		Hicurl::compileHistoryStatic($this->historyFileObject, $historyOutput,$customData);
+	}
+	
+	/**Compiles the history-file. This is to be done when the writing to the history-file is complete.
+	 * This essentialy puts the file in a closed state, gzipping it while also optionally adding extra data.
+	 * The data is structured as:<pre>
+	 * {//<-outermost object
+	 *		"customData":array//customData
+	 *		,"pages":array//array of
+	 * }
+	 * </pre>
+	 * 
+	 * @param string|SplFileObject $historyInput
 	 * @param type $historyOutput
 	 * @param type $customData
 	 * @return boolean
 	 */
-	
-	private static function compileHistoryReal($historyInput,$historyOutput,$customData) {
-		//at this point the history should look like:
-		//{"pages":[page1,page2
-		$historyInput->fwrite(']');
-		if (isset($customData)) {
-			$historyLength+=$historyInput->fwrite(',"customData":'.json_encode($customData));
+	public static function compileHistoryStatic($historyInput,$historyOutput,$customData=null) {
+		//at this point the history should be formated as:
+		//{"pages":[page1{},page2{}+tempData+tempDataSize
+		if (gettype($historyInput)=="string")
+			$historyInput=new SplFileObject($historyInput,'c+');
+		Hicurl::seekHistoryFileTempData($historyInput);
+		$ending=']';
+		if ($customData) {
+			$ending.=',"customData":'.$customData;
 		}
-		$historyInput->fwrite('}');
-		$this->compressHistoryFile($historyInput);
+		$ending.='}';
+		$historyInput->fwrite($ending);
+		$historyInput->ftruncate($historyInput->ftell());
+		Hicurl::compressHistoryFile($historyInput->getRealPath(),$historyOutput);
 	}
 	
 	/**Compress input-file with gzip encoding
 	 * @param string $historyFilePath*/
-	private function compressHistoryFile($historyFilePath,$writeToFile=true) {
+	private static function compressHistoryFile($inputFile,$outputFile=null,$writeToFile=true) {
 		//We want to use system gzip via exec(), and only if that fails fall back on php gzencode()
-		
-		//is exec() available? also checks whether exec is in ini_get('disable_functions') and whether safemode is on
+		//is exec() available?
+		//this should also check whether exec is in ini_get('disable_functions') and whether safemode is on
 		if(function_exists('exec')) {
 			//if system is windows then there is no native gzip-command, which is why we cd into src-folder where
 			//gzip.exe should be located, which will be used in that case. separate commands with ;
-			//--force is for forcing overwrite if output -file already exist
-			$command='cd '.__DIR__.';'
-					.'gzip --force ';
-			if (!$writeToFile)
-				$command.='--stdout ';
-			$command.=$historyFilePath;
-			exec($command, $output, $return_var);
-			if ($return_var!=0) {//success!(0 always mean success)
-				return true;
+			$command='cd "'.__DIR__.'" && '//cd to same folder as this very file
+					.'gzip -k -f -q ';//--force is for forcing overwrite if output-file already exist
+			//if (!$writeToFile) $command.=' --stdout';
+			$command.='"'.realpath($inputFile).'"';
+			if ($outputFile) {
+				//the reason why rename is used rather than passing an output-file to the gzip-call with > is that that
+				//doesn't work if input and output are the same, but it works with rename
+				rename ($inputFile.'.gz', $outputFile);
 			}
+			$response=exec($command, $output, $return_var);
+			if ($return_var==0)//success!
+				return true;
 		}
-		if (true) {
-			$historyInput->fseek(0,SEEK_END);
-			$historyLength=$historyInput->ftell();//getSize() returns 0 for some reason?
-			$historyInput->rewind();
-
-			//Set memory_limit to a high number or there might be a problem holding all page-contents in memory which is
-			//needed in order to gzip efficiently.
-			$memoryLimit=ini_get('memory_limit');//save old to be able to revert
-			ini_set('memory_limit', '512M');
-
-			$result=gzencode($historyInput->fread($historyLength));
-			$historyInput->ftruncate(0);
-			$historyInput->fwrite($result);
-			ini_set('memory_limit', $memoryLimit);//revert to old
-		} else if (wingzip) {
-			//use "Gzip for Windows"
-			//http://gnuwin32.sourceforge.net/packages/gzip.htm > Download>Binaries>gzip.exe(only needed file)
-			
-		}
+		//Hopefully the block above ended this function with a return statement, but otherwise fall back on below
+		
+		//Set memory_limit to a high number or there might be a problem holding all page-contents in memory which is
+		//needed in order to gzip efficiently.
+		$memoryLimit=ini_get('memory_limit');//save old to be able to revert
+		ini_set('memory_limit', -1);
+		file_put_contents($outputFile,gzencode(file_get_contents($inputFile)));
+		ini_set('memory_limit', $memoryLimit);//revert to old
+		return true;
 	}
 	private static function generateCurlOptions($url,$formdata,$settings) {
 		$curlOptions=[
