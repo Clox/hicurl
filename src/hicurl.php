@@ -512,7 +512,7 @@ class Hicurl {
 	 * 
 	 * @param string $historyPath
 	 */
-	public static function echoHistory($historyPath) {
+	public static function serveHistory($historyPath) {
 		ini_set('zlib.output_compression','Off');
 		$HTTP_ACCEPT_ENCODING = $_SERVER["HTTP_ACCEPT_ENCODING"]; 
 		header('Cache-Control: max-age=29030400, public');
