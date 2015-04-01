@@ -1,0 +1,39 @@
+/* 
+    Created on : 2015-mar-31, 17:37:44
+    Author     : Oscar Jonsson / ogggan@gmail.com
+*/
+@leftViewsWidth:150px;
+@rightViewsWidth:~"calc(100% - @{leftViewsWidth})";
+@filterViewHeight:150px;
+@pagesViewHeight:~"calc(100% - @{filterViewHeight})";
+.hicurl {
+	overflow:hidden;//the bottom resize-handles of the bottom views overflows
+	.pagesView {
+		width:@leftViewsWidth;
+		height: @pagesViewHeight;
+		position:absolute;
+		top:0;
+		left:0;
+	}
+	.jsonView {
+		width:@rightViewsWidth;
+		height:50%;
+		position:absolute;
+		top:0;
+		right:0;
+	}
+	.filterView {
+		width:@leftViewsWidth;
+		height:@filterViewHeight;
+		position:absolute;
+		left:0;
+		bottom:0;
+	}
+	.htmlView {
+		width:@rightViewsWidth;
+		height:50%;
+		position:absolute;
+		right:0;
+		bottom:0;
+	}
+}

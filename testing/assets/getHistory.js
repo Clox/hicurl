@@ -1,3 +1,3 @@
 $(function() {
-	var hicurl=new Hicurl(document.body);
+	hicurl=new Hicurl(document.body);
 });
