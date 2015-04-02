@@ -86,6 +86,6 @@ body {
   cursor: default;
 }
 .hicurl .tabs-disabled.tabs-first > a span {
-  font-weight: normal;
+  font-weight: bold;
 }
 /*# sourceMappingURL=hicurl.css.map */

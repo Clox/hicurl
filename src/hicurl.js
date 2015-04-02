@@ -49,6 +49,10 @@ Hicurl.prototype._historyLoadedHandler=function(event){
 		data:treeData,
 		onClick:$.proxy(this._pageClick,this)
 	});
+	
+	//this has to be called otherwise the layout will "sometimes" be a little messed up after the writing to the
+	//pageTree. calling it without the setTimeout doesn't fix it either, at least not always.
+	//But like this it looks like it never gets messed up.
 	setTimeout($.parser.parse);
 };
 Hicurl.prototype._pageClick=function(node) {

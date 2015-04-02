@@ -22,7 +22,8 @@ class Hicurl {
 		'maxFruitlessRetries'=>40,
 		'fruitlessPassDelay'=>10,
 		'maxRequestsPerPass'=>100,
-		'flags'=>3,
+		'retryOnNull'=>true,
+		'retryOnIncompleteHTML'=>true
 	];
 	
 	/**@param type $settings The same data as can be passed to settings().
@@ -49,21 +50,23 @@ class Hicurl {
 	 *		is less than this value then it will be split into groups at the size of this.</li>
 	 * <li>'cookie'	string If this is set to a path to a file then cookies will be saved to that file, and those cookies
 	 *		will also be sent on each request. Ex: dirname(__FILE__).'/cookie.txt</li>
-	 * <li>'flags' int An int with bit-flags.<ol>
-	 *		<li>First bit (1) Will make load-calls retry requests where response-content is null.</li>
-	 *		<li>Second bit(2) Will make load-calls retry requests where response doesn't end
-	 *			with the closing tag for the html (That is "&lt/html&gt") with possible following whitespace.</li></ol>
+	 * <li>'retryOnNull' boolean If true then load-calls will retry requests when response-content is null.</li>
+	 * <li>'retryOnIncompleteHTML' boolean if true then load-calls will retry requests when response	doesn't end
+	 *		with a HTML closing tag (That is "&lt/html&gt") with possible following whitespace.</li>
+	 * <li>'xpathValidate' string|string[]|array|boolean An xpath-string or an array of them may be passed here. These
+	 *		will be tried on the downloaded page. All of them have to evaluate to true or else the page-request will
+	 *		be retried. This will also cause a DOMXPath-object of the name "domXpath" to be returned by the load-call,
+	 *		so that the same page doesn't have to be parsed twice if some xpath-work has to be done after
+	 *		retrieval&validation of the page. The value of true may also be passed which will make the xpath-object
+	 *		appear in the returned array, but no paths will be evaluated.
+	 *		Also, rather than passing strings for xpaths, arrays of the following structure may be passed instead:
+	 *		['expression'=>xpathString,'error'=>errorDescription]
+	 *		This has the advantage of describing the error with a custom string.
 	 * <li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
 	 * <li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
 	 * <li>'history' string
-	 *		Enables saving contents/headers of request&responses in a file for later viewing. The value can be:<ul>
-	 *		<li>a path to a history-file. If it doesn't yet exist it will be created, else it will be appended to.</li>
-	 *		<li>or a path to a directory in which case the path-string should end with a slash (/). In this case a
-	 *		history-file will automatically be created in this directory. This can be useful during multithreading
-	 *		and avoids one thread having to wait for another for writing to the history-file since each thread gets
-	 *		its own if this setting is applied to each thread.</li></ul>
-	 *		Regardless of which alternative is used, compileHistory() is then to be used to finalize the
-	 *		history-writing.
+	 *		Enables saving contents/headers of request&responses in a file for later viewing. The value should be a
+	 *		path to a history-file. If it doesn't yet exist it will be created, else it will be appended to.
 	 *		For on the structure of history-files {@see writeHistory()}
 	 *		</li></ul>
 	 * @return array The resulted settings
@@ -74,7 +77,7 @@ class Hicurl {
 		if (array_key_exists('history',$settings)) {//if a setting for 'history' is present
 			if (!$settings['history']) {//if its null/false
 				$this->historyFileObject=null;//then close old connection
-			} else if (!$this->historyFileObject||$settings['history']!=$this->settingsData['history']) {
+			} else if (!isset($this->historyFileObject)||$settings['history']!=$this->settingsData['history']) {
 				$this->historyFileObject=new SplFileObject($settings['history'],'c+');
 				$this->historyFileObject->historyEmpty=!$this->historyFileObject->getSize();
 			}
@@ -116,8 +119,7 @@ class Hicurl {
 			$historyFileObject=new SplFileObject($settings['history'],'c+');
 		}
 		$historyFileObject->flock(LOCK_EX);
-		if (($historyFileObject&&$historyFileObject->historyEmpty)
-			||(!$historyFileObject&&(!file_exists($settings['history'])||!filesize($settings['history'])))) {
+		if (!file_exists($settings['history'])||!filesize($settings['history'])) {
 			$dataPrefix='{"pages":[';
 			$historyFileTempData=['numPages'=>0,'idIndices'=>[]];
 		} else {
@@ -152,7 +154,8 @@ class Hicurl {
 	 *		this array as formdata where key=name and value=value. It may be an empty array in which case the request
 	 *		will stil be sent as POST butwith no formdata.
 	 * @param array $settings Optional parameter of settings that will be merged with the settings of the instance for
-	 *		the duration of this call only.
+	 *		the duration of this call only. See Hicurl->settings() for explenation on the settings. The settings that
+	 *		may be passed to that function are identical to those that may be passed to this.
 	 * @param array $historyData Associative array for various settings used for the history-writing in case
 	 *		settings['history'] is set. The following are valid settings for it:<pre>[
 	 *			'name'=> string//a name for the historypage that will be visible in the history-viewer
@@ -207,6 +210,7 @@ class Hicurl {
 	private static function loadSingleReal($curlHandler,$historyFileObject,$url,$formdata,$settings,$historyData) {
 		curl_setopt_array($curlHandler, Hicurl::generateCurlOptions($url, $formdata));
 		$numRetries=-1;
+		$output=[];
 		if ($historyFileObject||!empty($settings['history'])) {//should we write history?
 			//see description of writeHistory() for explanation of the history-structure
 			$historyPage=[
@@ -223,9 +227,9 @@ class Hicurl {
 				}
 				sleep($settings['fruitlessPassDelay']);
 			}
-			$content=curl_exec($curlHandler);
-			$headers=curl_getinfo($curlHandler);
-			$error=Hicurl::parseAndValidateResult($content,$headers,$settings);
+			$content=curl_exec($curlHandler);//do the actual request. assign response-content to $content
+			$headers=curl_getinfo($curlHandler);//get the headers too
+			$error=Hicurl::parseAndValidateResult($content,$headers,$settings,$output['domXpath']);
 			if (isset($historyPage)) {//are we writing history-data? this var is only set if we do
 				$historyPage['exchanges'][]=[
 					'content'=>$content,
@@ -237,14 +241,13 @@ class Hicurl {
 		if (isset($historyPage)) {//should we write history?
 			Hicurl::writeHistory($historyFileObject, $historyPage, $settings, $historyData);
 		}
-		$output=[
+		return $output+=[
 			'content'=>$content,
 			'headers'=>$headers
 		];
-		return $output;
 	}
 	
-	private static function parseAndValidateResult(&$content,$headers, $settings) {
+	private static function parseAndValidateResult(&$content,$headers, $settings,&$domXpath) {
 		if (ord($content[0])==0x1f && ord($content[1])==0x8b) {
 			$content=gzdecode($content);
 		}
@@ -254,50 +257,70 @@ class Hicurl {
 			$content=utf8_encode($content);
 		}
 		if ($headers['http_code']==404) {
-			return 'http code 404';
+			return 'HTTP code 404';
 		}
-		if ($settings['flags']&1&&$content===null) {
-			return 'null content';
+		if ($settings['retryOnNull']&&$content===null) {
+			return 'Null content';
 		}
-		if ($settings['flags']&2&&!preg_match("/<\/html>\s*$/",$content)) {	
-			return 'cut off html';
+		if ($settings['retryOnIncompleteHTML']&&!preg_match("/<\/html>\s*$/",$content)) {	
+			return 'Cut off HTML';
+		}
+		if (isset($settings['xpathValidate'])) {
+			$xpaths=$settings['xpathValidate'];
+			$domDocument = new DOMDocument();
+			$domDocument->loadHTML($content);
+			$domXpath=new DOMXPath($domDocument);
+			if (xpaths!==true) {
+				if (gettype($xpaths)=='string'||isset($xpaths['xpath']))//if true it means a single xpath was passed
+					$xpaths=[$xpaths];//then put in array for convenience of using the below loop
+				foreach ($xpaths as $xpath) {
+					if (gettype($xpath)=='string') {
+						$expression=$xpath;
+						$errorDescription="The following xpath-validation failed: ".$expression;
+					} else {
+						$expression=$xpath['expression'];
+						$errorDescription=$xpath['error'];
+					}
+					if (!(boolean)$domXpath->query($expression)) {
+						return $errorDescription;
+					}
+				}
+			}
 		}
 		return false;
 	}
 	
 	/**Compiles the history-file. This is to be done when the writing to the history-file is complete.
 	 * This essentialy puts the file in a closed state, gzipping it while also optionally adding extra data.
-	 * The data is structured as:<pre>
-	 * {//<-outermost object
-	 *		"customData":array//customData
-	 *		,"pages":array//array of
-	 * }
-	 * </pre>
-	 * 
-	 * @param type $historyOutput
-	 * @param type $customData
-	 * @return boolean*/
+	 * @param string|null $historyOutput A filepath-string to the file to be created. This may be omitted in which case
+	 *		the output-file will be generated in the same directory as the input-file, with the same name but with
+	 *		".gz" added at the end.
+	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
+	 *		the final, compiled json-object with the same name("customData")
+	 * @return boolean Returns true for success*/
 	public function compileHistory($historyOutput=null,$customData=null) {
-		Hicurl::compileHistoryStatic($this->historyFileObject, $historyOutput,$customData);
+		$historyInput=$this->historyFileObject;
+		$this->historyFileObject=null;
+		Hicurl::compileHistoryStatic($historyInput, $historyOutput,$customData);
 	}
 	
 	/**Compiles the history-file. This is to be done when the writing to the history-file is complete.
 	 * This essentialy puts the file in a closed state, gzipping it while also optionally adding extra data.
-	 * The data is structured as:<pre>
-	 * {//<-outermost object
-	 *		"customData":array//customData
-	 *		,"pages":array//array of
-	 * }
-	 * </pre>
-	 * 
-	 * @param string|SplFileObject $historyInput
-	 * @param type $historyOutput
-	 * @param type $customData
-	 * @return boolean
-	 */
-	public static function compileHistoryStatic($historyInput,$historyOutput,$customData=null) {
-		//at this point the history should be formated as:
+	 * @param string|SplFileObject $historyInput Either a string which is a path to a file that is to be compiled,
+	 *		or a SplFileObject pointing to that file. This file will be deleted by this function, leaving you only
+	 *		with its compiled state.
+	 * @param string|null $historyOutput A filepath-string to the file to be created. This may be omitted in which case
+	 *		the output-file will be generated in the same directory as the input-file, with the same name but with
+	 *		".gz" added at the end.
+	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
+	 *		the final, compiled json-object with the same name("customData")
+	 * @return boolean Returns true for success*/
+	public static function compileHistoryStatic($historyInput,$historyOutput=null,$customData=null) {
+		//At this point the history should be formated as:
 		//{"pages":[page1{},page2{}+tempData+tempDataSize
+		//i.e.
+		//{"pages":[{"exchanges":[{"content":"foobar","headers":{"http_code":200}}]}{"numPages":1,"idIndices":[]}29
+		//(the outer bracket&brace aren't closed)
 		if (gettype($historyInput)=="string")
 			$historyInput=new SplFileObject($historyInput,'c+');
 		Hicurl::seekHistoryFileTempData($historyInput);
@@ -308,7 +331,11 @@ class Hicurl {
 		$ending.='}';
 		$historyInput->fwrite($ending);
 		$historyInput->ftruncate($historyInput->ftell());
-		Hicurl::compressHistoryFile($historyInput->getRealPath(),$historyOutput);
+		
+		$historyInputPath=$historyInput->getRealPath();
+		$historyInput=null;//remove the reference to the file so that gzip can delete it as supposed to
+		
+		Hicurl::compressHistoryFile($historyInputPath,$historyOutput);
 	}
 	
 	/**Compress input-file with gzip encoding
@@ -321,26 +348,27 @@ class Hicurl {
 			//if system is windows then there is no native gzip-command, which is why we cd into src-folder where
 			//gzip.exe should be located, which will be used in that case. separate commands with ;
 			$command='cd "'.__DIR__.'" && '//cd to same folder as this very file
-					.'gzip -k -f -q ';//--force is for forcing overwrite if output-file already exist
+					.'gzip -f -q ';//--force is for forcing overwrite if output-file already exist
 			//if (!$writeToFile) $command.=' --stdout';
 			$command.='"'.realpath($inputFile).'"';
 			if ($outputFile) {
 				//the reason why rename is used rather than passing an output-file to the gzip-call with > is that that
-				//doesn't work if input and output are the same, but it works with rename
+				//doesn't work if input and output are the same, but it works with rename.
 				rename ($inputFile.'.gz', $outputFile);
 			}
 			$response=exec($command, $output, $return_var);
+			$a=unlink ($inputFile);
 			if ($return_var==0)//success!
 				return true;
 		}
-		//Hopefully the block above ended this function with a return statement, but otherwise fall back on below
+		//Hopefully the block above ended this function with a return statement, but otherwise fall back on below code
 		
 		//Set memory_limit to a high number or there might be a problem holding all page-contents in memory which is
 		//needed in order to gzip efficiently.
 		$memoryLimit=ini_get('memory_limit');//save old to be able to revert
 		ini_set('memory_limit', -1);
 		file_put_contents($outputFile,gzencode(file_get_contents($inputFile)));
-		ini_set('memory_limit', $memoryLimit);//revert to old
+		ini_set('memory_limit', $memoryLimit);//revert back to old
 		return true;
 	}
 	private static function generateCurlOptions($url,$formdata,$settings) {
