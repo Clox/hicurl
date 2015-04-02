@@ -20,8 +20,8 @@ function Hicurl(domElement,dataUrl) {
 	var centerLayout=component(center,"fit:true",null,"easyui-layout");
 	this._jsonPanel=component(centerLayout,"region:'center',title:'JSON'",{height:"50%"});
 	var contentPanel=component(centerLayout,"region:'south',title:'',split:true",{height:"50%"});
-	var contentTabs=component(contentPanel,null,{width:"100%"},"easyui-tabs content");
-	component(contentTabs).title="Content";
+	var contentTabs=this._contentTabs=component(contentPanel,null,{width:"100%"},"easyui-tabs content");
+	component(contentTabs,"selected: false").title="Content";
 	$.parser.parse();
 	$(contentTabs).tabs('disableTab', 0);
 		
@@ -52,14 +52,27 @@ Hicurl.prototype._historyLoadedHandler=function(event){
 	setTimeout($.parser.parse);
 };
 Hicurl.prototype._pageClick=function(node) {
-	var pageClone=JSON.parse(JSON.stringify(this._data.pages[node.index]))
+	var pageClone=JSON.parse(JSON.stringify(this._data.pages[node.index]));
 	for (var i=0; i<pageClone.exchanges.length; i++) {
 		pageClone.exchanges[i].content="&lt;content&gt;";
 	}
+	var opts={indent_char:"  "};//tabs don't work in textareas with nowrap-setting
 $(this._jsonPanel).jstree({
 	core : {
 		data:Hicurl._jstreeFormat(pageClone,node.text)
 	} });
+	var exchanges=this._data.pages[node.index].exchanges;
+	for (var i=0; i<exchanges.length; i++) {
+		var textArea=tt=document.createElement("textArea");
+		textArea.value=html_beautify(exchanges[i].content,opts);
+		textArea.readOnly = true;
+		textArea.className="pageContent";
+		$(this._contentTabs).tabs('add',{
+			title: !exchanges[i].error?"Success":exchanges[i].error,
+			selected: true,
+			content:textArea,
+		});
+	}
 	
 };
 
@@ -67,9 +80,9 @@ $(this._jsonPanel).jstree({
 Hicurl._jstreeFormat=function(value,key) {
 	var type=$.type(value);
 	var result={text:"<span class='propertyKey'>"+key+"</span> ",icon:type};
-	if (value=="&lt;content&gt;")
+	if (value==="&lt;content&gt;")
 		result.icon="html";
-	if (type=="object"||type=="array") {
+	if (type==="object"||type==="array") {
 		var children=result.children=[];
 			for (var key in value)
 				if (value.hasOwnProperty(key))
@@ -78,4 +91,4 @@ Hicurl._jstreeFormat=function(value,key) {
 		result.text+=String(value);
 	}
 	return result;
-}
+};

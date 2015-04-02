@@ -77,4 +77,23 @@ body {
 			visibility: visible;
 		}
 	}
+	textArea.pageContent {
+		border:0;
+		padding:0;
+		width:100%;
+		position:absolute;
+		top:31px;
+		bottom:0;
+		resize:none;
+		white-space: nowrap;
+	}
+	
+	//The "Content"-text in the bottom right panel is actually not some title-element, but a tab. That is done to save
+	//some screen realestate, otherwise there would be one more fat bar. The block below is for that "title-tab"
+	.tabs-disabled.tabs-first>a {
+		cursor:default;
+		span{
+			font-weight: normal;
+		}
+	}
 }

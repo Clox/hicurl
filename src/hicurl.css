@@ -72,4 +72,20 @@ body {
 .hicurl .tabs-disabled.tabs-first > a > span {
   visibility: visible;
 }
+.hicurl textArea.pageContent {
+  border: 0;
+  padding: 0;
+  width: 100%;
+  position: absolute;
+  top: 31px;
+  bottom: 0;
+  resize: none;
+  white-space: nowrap;
+}
+.hicurl .tabs-disabled.tabs-first > a {
+  cursor: default;
+}
+.hicurl .tabs-disabled.tabs-first > a span {
+  font-weight: normal;
+}
 /*# sourceMappingURL=hicurl.css.map */
