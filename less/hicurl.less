@@ -6,6 +6,9 @@
 @rightViewsWidth:~"calc(100% - @{leftViewsWidth})";
 @filterViewHeight:150px;
 @pagesViewHeight:~"calc(100% - @{filterViewHeight})";
+body {
+	background-color: grey;
+}
 .hicurl {
 	overflow:hidden;//the bottom resize-handles of the bottom views overflows
 	.pagesView {
@@ -35,5 +38,43 @@
 		position:absolute;
 		right:0;
 		bottom:0;
+	}
+	.jstree {
+		span.propertyKey {
+			border:1px solid grey;
+			padding:1px;
+		}
+		.jstree-themeicon-custom {
+			font-weight: bold;
+			font-size:15px;
+			&.null:after {
+				content:"?";
+			}
+			&.object:after {
+				content:"{ }";
+			}
+			&.array:after {
+				content:"[ ]";
+			}
+			&.string:after {
+				content:'" "';
+			}
+			&.boolean:after {
+				content:"0/1";
+			}
+			&.number:after {
+				content:"#";
+			}
+			&.html:after {
+				content:"< >";
+			}
+		}
+	}
+	.tabs-disabled.tabs-first {
+		opacity:1;
+		visibility: hidden;
+		>a>span {
+			visibility: visible;
+		}
 	}
 }
