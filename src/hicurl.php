@@ -53,15 +53,23 @@ class Hicurl {
 	 * <li>'retryOnNull' boolean If true then load-calls will retry requests when response-content is null.</li>
 	 * <li>'retryOnIncompleteHTML' boolean if true then load-calls will retry requests when response	doesn't end
 	 *		with a HTML closing tag (That is "&lt/html&gt") with possible following whitespace.</li>
-	 * <li>'xpathValidate' string|string[]|array|boolean An xpath-string or an array of them may be passed here. These
-	 *		will be tried on the downloaded page. All of them have to evaluate to true or else the page-request will
-	 *		be retried. This will also cause a DOMXPath-object of the name "domXpath" to be returned by the load-call,
+	 * <li>'xpathValidate' array|array[]|boolean Setting for doing xpath-validation.
+	 *		It expects an xpath-object in the following format:\n
+	 *		['expression'=>string xpath,'error'=>string errorDescription,'compare'=>string comparisonString]\n
+	 *		<ul><li>'expression' should simply be an xpath-string</li>
+	 *		<li>'error' optional string describing the error if it fails</li>
+	 *		<li>'compare' A string specifying condition(s) the fetched value needs to meet. If any of them fail then
+	 *		the request is considered failed and could be retried.
+	 *		Some example values:
+	 *		<ul><li>'x>5' - The value needs to be higher than 5</li>
+	 *		<li>'x<=8.5' - The value needs to be lower or equal to 8.5</li>
+	 *		<li>'x==99' - The value needs to be 99</li>
+	 *		<li>'x>5&&x<10' - The value needs to be between 5 and 10</li></ul>
+	 *		This will also cause a DOMXPath-object of the name "domXpath" to be returned by the load-call,
 	 *		so that the same page doesn't have to be parsed twice if some xpath-work has to be done after
 	 *		retrieval&validation of the page. The value of true may also be passed which will make the xpath-object
 	 *		appear in the returned array, but no paths will be evaluated.
-	 *		Also, rather than passing strings for xpaths, arrays of the following structure may be passed instead:
-	 *		['expression'=>xpathString,'error'=>errorDescription]
-	 *		This has the advantage of describing the error with a custom string.
+	 *		Also, rather than passing one of these xpath-objects, an array of themmay be passed.
 	 * <li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
 	 * <li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
 	 * <li>'history' string
@@ -251,7 +259,7 @@ class Hicurl {
 		if (ord($content[0])==0x1f && ord($content[1])==0x8b) {
 			$content=gzdecode($content);
 		}
-		//utf8 is needed to correctly json-decode
+		//utf8 is needed to json-decode correctly
 		//can't blindly utf8-encode or data will be corrupted if it already was utf8 encoded.
 		if (strpos($headers['content_type'],'utf-8')===false) {
 			$content=utf8_encode($content);
@@ -265,31 +273,60 @@ class Hicurl {
 		if ($settings['retryOnIncompleteHTML']&&!preg_match("/<\/html>\s*$/",$content)) {	
 			return 'Cut off HTML';
 		}
-		if (isset($settings['xpathValidate'])) {
-			$xpaths=$settings['xpathValidate'];
-			$domDocument = new DOMDocument();
+		if (isset($settings['xpathValidate'])) {//if we are to do xpath-validation
+			$xpaths=$settings['xpathValidate'];//plural because there might be multiple
+			$domDocument=new DOMDocument();
 			$domDocument->loadHTML($content);
 			$domXpath=new DOMXPath($domDocument);
-			if (xpaths!==true) {
-				if (gettype($xpaths)=='string'||isset($xpaths['xpath']))//if true it means a single xpath was passed
+			//if it's set to true then we do not do any validation, but instead just assign domXpath to return-object.
+			//(domXpath is a reference)
+			if ($xpaths!==true) {
+				if (isset($xpaths['expression']))//if true it means a single xpath was passed
 					$xpaths=[$xpaths];//then put in array for convenience of using the below loop
 				foreach ($xpaths as $xpath) {
-					if (gettype($xpath)=='string') {
-						$expression=$xpath;
-						$errorDescription="The following xpath-validation failed: ".$expression;
-					} else {
-						$expression=$xpath['expression'];
-						$errorDescription=$xpath['error'];
-					}
-					if (!(boolean)$domXpath->query($expression)) {
-						return $errorDescription;
+					$expression=$xpath['expression'];
+					if (isset($xpath['error']))
+						$error=$xpath['error'];
+					else
+						$error="The following xpath failed:".$expression;
+					$xpathResult=$domXpath->query($expression);
+					if (!$xpathResult->length||		(isset($xpath['compare'])&&
+						!Hicurl::xcompare($xpath['compare'], $xpathResult->item(0)->nodeValue))) {
+						return $error;//fail if xpathResult didn't get anything, or it did but compare-expression failed
 					}
 				}
 			}
 		}
 		return false;
 	}
-	
+	private static function xcompare($expressions,$x) {
+		$expressions=explode("&&", $expressions);
+		foreach ($expressions as $expression) {
+			preg_match('/x(==|<=|>=|<|>)([\d+.]+)/',$expression,$matches);
+			switch ($matches[1]) {
+				case '>':
+					if ($x<=$matches[2])
+						return false;
+				break;
+				case '<':
+					if ($x>=$matches[2])
+						return false;
+				break;
+				case '<=':
+					if ($x>$matches[2])
+						return false;
+				break;
+				case '>=':
+					if ($x<$matches[2])
+						return false;
+				break;
+				case '==':
+					if ($x!=$matches[2])
+						return false;
+			}
+		}
+		return true;
+	}
 	/**Compiles the history-file. This is to be done when the writing to the history-file is complete.
 	 * This essentialy puts the file in a closed state, gzipping it while also optionally adding extra data.
 	 * @param string|null $historyOutput A filepath-string to the file to be created. This may be omitted in which case
