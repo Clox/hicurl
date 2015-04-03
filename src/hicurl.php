@@ -34,6 +34,7 @@ class Hicurl {
 			$this->settings($settings);
 		$this->curlHandler=curl_init();
     }
+	
 	/** @var mixed[] This method is used for changing settings after having constructed an instance. The settings
 	 * passed to this method will be merged with the current settings. To remove a setting, set it to null. Besides
 	 * calling this method the settings can also temporarily be changed during one load-call by passing the settings
@@ -54,22 +55,26 @@ class Hicurl {
 	 * <li>'retryOnIncompleteHTML' boolean if true then load-calls will retry requests when response	doesn't end
 	 *		with a HTML closing tag (That is "&lt/html&gt") with possible following whitespace.</li>
 	 * <li>'xpathValidate' array|array[]|boolean Setting for doing xpath-validation.
-	 *		It expects an xpath-object in the following format:\n
-	 *		['expression'=>string xpath,'error'=>string errorDescription,'compare'=>string comparisonString]\n
-	 *		<ul><li>'expression' should simply be an xpath-string</li>
-	 *		<li>'error' optional string describing the error if it fails</li>
-	 *		<li>'compare' A string specifying condition(s) the fetched value needs to meet. If any of them fail then
-	 *		the request is considered failed and could be retried.
+	 *		It expects an xpath-object in the following format:<br>
+	 *		['expression'=>string,'error'=>string,'compare'=>string]
+	 *		<ul><li>'expression' string simply be an xpath-string</li>
+	 *		<li>'error' string optional description of the error if it fails</li>
+	 *		<li>'compare' string An optional string specifying comparison-condition(s) the fetched value needs to meet.
+	 *		Normally with xpath one could do something like '//*[@id="myNumer"]/span>5' but php's xpath doesn't
+	 *		support such operations, and can only return nodes, not booleans. If any of them fail then the request
+	 *		is considered failed and will be retried if it's allowed.
 	 *		Some example values:
 	 *		<ul><li>'x>5' - The value needs to be higher than 5</li>
 	 *		<li>'x<=8.5' - The value needs to be lower or equal to 8.5</li>
 	 *		<li>'x==99' - The value needs to be 99</li>
 	 *		<li>'x>5&&x<10' - The value needs to be between 5 and 10</li></ul>
+	 *		</li></ul>
 	 *		This will also cause a DOMXPath-object of the name "domXpath" to be returned by the load-call,
 	 *		so that the same page doesn't have to be parsed twice if some xpath-work has to be done after
 	 *		retrieval&validation of the page. The value of true may also be passed which will make the xpath-object
-	 *		appear in the returned array, but no paths will be evaluated.
-	 *		Also, rather than passing one of these xpath-objects, an array of themmay be passed.
+	 *		appear in the returned array, but no xpaths will be evaluated.
+	 *		If no compare-value is passed the xpath-validation will succeed as long as it matches as least 1 node.
+	 *		Also, rather than passing one of these xpath-objects, an array of them may be passed.
 	 * <li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
 	 * <li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
 	 * <li>'history' string
@@ -463,143 +468,6 @@ class Hicurl {
 		}
 		return $curlOptions;
 	}
-	function loadMulti($urls,$postvars) {
-		if (!is_array($urls)) {
-			$urls=[$urls];
-		}
-		$mh=curl_multi_init();
-		$handles=[];
-		$output=[];
-		$failedIndices=[];
-		$passNumber=0;
-		//if ($flags|8)
-		//	fwrite($logfile,date('H:i:s T ')."Starting to download ".count($urls)." $generalName.\r\n");
-		$numRetries=0;
-		 /** @var int count of how many consecutive retry passes where no pages were successfully downloaded*/
-		do {
-			++$passNumber;
-//			if ($flags|8) {
-//				fwrite($logfile,date('H:i:s T ')."Pass $passNumber start with "
-//						.min([$this->maxRequestsPerPass,count($urls)+count($handles)])." downloads. "
-//						.(count($urls)+count($handles))." requests remaining.\r\n");
-//			}
-			foreach ($urls as $urlIndex=>$url) {
-				if (count($handles)==$this->maxRequestsPerPass)
-					break;
-				$fruitlessRetries=0;
-				$curlOptions=[
-					CURLOPT_URL => $url,
-					CURLOPT_RETURNTRANSFER => true,
-					CURLOPT_FOLLOWLOCATION => true,
-					CURLOPT_SSL_VERIFYPEER => false,
-					//CURLINFO_HEADER_OUT => true,
-					//CURLOPT_VERBOSE=>true,
-					//CURLOPT_PROXY=>'127.0.0.1:8888'
-				];
-				if (isset($this->cookie)) {
-					$curlOptions[CURLOPT_COOKIEFILE]=$curlOptions[CURLOPT_COOKIEJAR]=$this->cookie;
-				}
-				if (isset($postvars)) {
-					$curlOptions[CURLOPT_POST]=true;
-					foreach ($postvars as $key => $value) {
-						$params[] = $key . '=' . urlencode($value);
-					}
-					$curlOptions[CURLOPT_POSTFIELDS]=implode('&', $params);
-					/*
-					$curlOptions[CURLOPT_POSTFIELDS]='';
-					foreach($postvars as $key=>$value) {
-						$curlOptions[CURLOPT_POSTFIELDS] .= $key . "=" . $value . "&";
-					}
-					 */
-					if (isset($this->postHeaders)) {
-						$curlOptions[CURLOPT_HTTPHEADER]=$this->postHeaders;//10023
-					}
-				} else if (isset($this->getHeaders)) {
-					$curlOptions[CURLOPT_HTTPHEADER]=$this->getHeaders;//10023
-				}
-				
-				curl_setopt_array($handles[$urlIndex]=curl_init(), $curlOptions);
-				curl_multi_add_handle($mh, $handles[$urlIndex]);
-				unset ($urls[$urlIndex]);
-			}
-			do {//snippet from http://php.net/manual/en/function.curl-multi-exec.php#113002
-				curl_multi_exec($mh, $running);
-				curl_multi_select($mh);
-			} while ($running > 0);
-
-			foreach ($handles as $key=>$handle) {
-				$content=curl_multi_getcontent($handle);
-				if (ord($content[0])==0x1f && ord($content[1])==0x8b) {
-					$content=gzdecode($content);
-				}
-				$header=curl_getinfo($handle);
-				if (strpos($header['content_type'],'utf-8')===false) {
-					$content=utf8_encode($content);
-				}
-//			$output['responses'][$key][]=
-//				writeLogFile(
-//					json_encode(
-//						[
-//							'content'=>$content,
-//							'headerInfo'=>$header
-//						]
-//					)
-//				,"","swap/");
-//				if (json_last_error())
-//					trigger_error("Error json-encoding downloaded page:".  json_last_error_msg(), E_USER_ERROR);
-				if (($header['http_code']==404&&$reason="http_code 404")
-				||($this->flags&1&&$content===null&&$reason="null content")
-				||($this->flags&2&&!preg_match("/<\/html>\s*$/",$content)&&$reason="cut off HTML")) {	
-					if ($this->flags|8) {
-						$logText="Will have to retry download of <a href=".
-								curl_getinfo($handles[$key],CURLINFO_EFFECTIVE_URL).">({$key})";
-						if (isset($specificNames[$key])) {
-							 if (gettype($specificNames[$key])=="string")
-								$logText.='"'.$specificNames[$key].'"';
-							 else
-								$logText.='"'.$specificNames[$key]["name"].'"';
-						}
-//						fwrite($logfile,date('H:i:s T ')
-//						.$logText."</a> because of $reason.\r\n");
-					}
-					//Will have to retry this request. Remove and re-add the handle in the multihandler to enable that.
-					curl_multi_remove_handle($mh, $handle);
-					curl_multi_add_handle($mh, $handle);
-					++$numRetries;
-				} else {
-					$output['contents'][$key]=$content;
-					$output['headers'][$key]=$header;
-					curl_multi_remove_handle($mh, $handle);
-					curl_close($handle);
-					unset ($handles[$key]);
-					$fruitlessRetries=-1;
-				}
-			}
-			if (++$fruitlessRetries>0) {//if this was a fruitless pass
-				if ($fruitlessRetries==$this->maxFruitlessRetries||!$this->maxFruitlessRetries) {
-//					fwrite($logfile,date('H:i:s T ')."Max amount of download-retries reached for this set."
-//							. "Leaving ".count($handles)." request(s) unfinished.\r\n");
-					foreach ($handles as $handle) {
-						curl_multi_remove_handle($mh, $handle);
-						curl_close($handle);
-					}
-					array_merge($failedIndices,array_keys($handles));
-					$handles=[];
-					continue;
-				}
-//				if ($this->flags|8)
-//					fwrite($logfile,date('H:i:s T ')."No requests were successful on this download-pass. Sleeping for "
-//						.$fruitlessPassDelay." seconds then trying again.\r\n");
-			   sleep($this->fruitlessPassDelay);
-			}
-		} while (!empty($handles)||!empty($urls));
-//		if ($this->flags|8)
-//			fwrite($logfile,date('H:i:s T ')
-//					."Finished downloading $generalName with $numRetries retry-passes.\r\n");
-		$output['numRetries']=$numRetries;
-		$output['failedIndices']=$failedIndices;
-		return $output;
-	}
 	
 	/**
 	 * 
@@ -624,22 +492,4 @@ class Hicurl {
 		} else
 			echo gzdecode (file_get_contents($historyPath));
 	}
-}
-
-/**
- * Thread-safe filecreation.
- * @param string $dir Path to directory where the file should be created
- * @param string $prefix Prefix that will be prepended to the generated filename
- * @param string $suffix Suffix that will be appended ot the generated filename, commonly fileextension
- * @param string $content An optional string that will be inserted into the generated file upon creation.
- * @return string[] An array with a length of 2 where the first element is the path plus the filename of the generated
- *		file, and the second element is only the filename.
- */
-function createFile($dir,$prefix='temp',$suffix='.log',$content=NULL) {
-	while (!($handle=@fopen($filepathname=$dir.($filename=$prefix.uniqid().$suffix),'x')));
-	if (isset($content)) {
-		fwrite($handle,$content);
-	}
-	fclose($handle);
-	return [$filepathname,$filename];
 }
