@@ -127,13 +127,15 @@ class Hicurl {
 			$historyFileObject=new SplFileObject($settings['history'],'c+');
 		}
 		$historyFileObject->flock(LOCK_EX);
-		if (!file_exists($settings['history'])||!filesize($settings['history'])) {
+		//check if the historyFile is empty. we don't have to check for file-existence because it will always
+		//have been created by now byt simply creating the SplFileObject
+		if (!$historyFileObject->fstat()['size']) {
 			$dataPrefix='{"pages":[';
 			$historyFileTempData=['numPages'=>0,'idIndices'=>[]];
 		} else {
 			$dataPrefix=',';
 			$tempDataSize=Hicurl::seekHistoryFileTempData($historyFileObject);
-			$historyFileTempData=$historyFileObject->fread($tempDataSize);
+			$historyFileTempData=json_decode($historyFileObject->fread($tempDataSize),true);
 			$historyFileObject->fseek(-4-$tempDataSize, SEEK_END);
 		}
 		if (isset($historyData['id'])) {
@@ -144,8 +146,8 @@ class Hicurl {
 		}
 		++$historyFileTempData['numPages'];
 		$historyFileObject->fwrite($dataPrefix.json_encode($data));
-		$headerSize=$historyFileObject->fwrite($historyFileTempData);
-		$historyFileObject->fwrite(pack('N',$headerSize));
+		$tempDataSize=$historyFileObject->fwrite(json_encode($historyFileTempData));
+		$historyFileObject->fwrite(pack('N',$tempDataSize));
 		$historyFileObject->flock(LOCK_UN);
 	}
 	private static function seekHistoryFileTempData($historyFileObject) {
@@ -154,77 +156,102 @@ class Hicurl {
 		$historyFileObject->fseek(-4-$tempDataSize, SEEK_END);
 		return $tempDataSize;
 	}
+	
 	/**This is the heart of Hicurl. It loads a requested url, using specified settings and returns the
-	 * server-response along with some data, and optionally writes all data to a history-file.
-	 * This method has a static method counterpart called loadSingleStatic which works just the same.
+	 * server-response along with some data and optionally writes all data to a history-file.
+	 * This method has a static counterpart of the name loadSingleStatic which works just the same.
 	 * @param string $url A URL-string to load
-	 * @param string[] $formdata If this is null then the request is sent as GET. Otherwise it is sent as POST using
+	 * @param array|null $formdata If this is null then the request is sent as GET. Otherwise it is sent as POST using
 	 *		this array as formdata where key=name and value=value. It may be an empty array in which case the request
 	 *		will stil be sent as POST butwith no formdata.
 	 * @param array $settings Optional parameter of settings that will be merged with the settings of the instance for
 	 *		the duration of this call only. See Hicurl->settings() for explenation on the settings. The settings that
 	 *		may be passed to that function are identical to those that may be passed to this.
-	 * @param array $historyData Associative array for various settings used for the history-writing in case
-	 *		settings['history'] is set. The following are valid settings for it:<pre>[
-	 *			'name'=> string//a name for the historypage that will be visible in the history-viewer
-	 *			,'id'=> mixed//a id may be set here which then can be used to refer to this page as a parent of another
-	 *			,'parentId'=> mixed//the id of another page may be set here to refer to it as the parent of this page
-	 *		]</pre>
-	 * @return array An array in the form of: [
-	 *		['content'] string The content of the requested url. In case the request had to be retried, this will only
-	 *			contain the final content. Will be set to null if request failed indefinately.
-	 *		['headers'] array The headers of the final content. Will be set to null if request failed indefinately.
-	 *		['historyFileName'] string This will be present if settings['saveDataDir'] is set and will be the filename
-	 *			with path of the generated file.
-	 *		['error'] string In case the request failed indefinately this will be set to a string explaining the error.
-	 * ]
+	 * @param array $history Associative array of various settings used for the history-writing which will only be
+	 *		used if settings['history'] is set. The following are valid settings for it:<ul>
+	 *			<li>['name']=> string a name for the historypage that will be visible in the history-viewer</li>
+	 *			<li>['id']=> String|Integer|Float An id may be set here which then can be used to refer to this page
+	 *				as a parent of another</li>
+	 *			<li>['parentId']=> String|Integer|Float The id of another page may be set here to refer to it as the
+	 *				parent of this page</li>
+	 *			<li>['customData']=> mixed This may be set to anything that is json-friendly. It will be assigned to the
+	 *			root of the page-object in the final, compiled json-object with the same name e.g. 'customData'.</li>
+	 *		</ul>
+	 * @return array An associative array with the following elements: <ul>
+	 *		<li>['content'] string The content of the requested url. In case the request had to be retried, this will
+	 *			only contain the final content. Will be set to null if request failed indefinately.</li>
+	 *		<li>['headers'] array The headers that go with the above content. Null if request failed indefinately.</li>
+	 *		<li>['error'] string Description of the error in case the request failed indefinately.</li>
+	 * </ul>
 	 * @see loadSingleStatic*/
-	public function loadSingle($url,$formdata=null,$settings=null,$historyName=[],$historyCustomData=[]) {
-		$historyFileObject;
-		if ($this->historyFileObject
+	public function loadSingle($url,$formdata=null,$settings=[],$history=[]) {
+		//pass the historyFileObject of this instance if it has one and it doesn't temporarily get overwritten by
+		//the history-item i the $settings-argument
+		$historyFileObject=null;//if the next condition fails then null will be used which will result in
+		//loadSingleReal creating a new, tempoary one if histor is set in $settings
+		if ($this->historyFileObject//if the instance has a fileObject and there's no history-item in the
+		//$settings-argument, or if there is it's setting is the same as the one in the instance-settings
 			&&(!array_key_exists('history', $settings) || $settings['history']==$this->settingsData['history'])) {
-			$historyFileObject=$this->historyFileObject;
+			$historyFileObject=$this->historyFileObject;//then the instance fileObject will be used
 		}
 			
 		return Hicurl::loadSingleReal($this->curlHandler,$historyFileObject, $url, $formdata,
-				($settings?$settings:[])+$this->settingsData,$historyName, $historyCustomData);
+				($settings?$settings:[])+$this->settingsData,$history);
 	}
+	
 	/**This is the heart of Hicurl. It loads a requested url, using specified settings and returns the
-	 * server-response along with some data, and optionally writes all data to a history-file.
-	 * This method has a instance method counterpart called loadSingle which works just the same.
+	 * server-response along with some data and optionally writes all data to a history-file.
+	 * This method has a instance counterpart of the name loadSingle which works just the same.
 	 * @param string $url A URL-string to load
-	 * @param string[] $formdata If this is null then the request is sent as GET. Otherwise it is sent as POST using
+	 * @param array|null $formdata If this is null then the request is sent as GET. Otherwise it is sent as POST using
 	 *		this array as formdata where key=name and value=value. It may be an empty array in which case the request
 	 *		will stil be sent as POST butwith no formdata.
-	 * @param array $settings Optional parameter of settings that will be merged with the default settings
-	 *		HiCurl::defaultSettings and then used for this reqest. {@see settings()}
-	 * @param array $historyData Associative array for various settings used for the history-writing.
-	 *		This is only used if settings['history'] is set. The following are valid settings for it:<pre>[
-	 *			'name'=> string//a name for the historypage that will be visible in the history-viewer
-	 *			,'id'=> mixed//a id may be set here which then can be used to refer to this page as a parent of another
-	 *			,'parentId'=> mixed//the id of another page may be set here to refer to it as the parent of this page
-	 *		]</pre>
-	 * @return array An array in the form of: [
-	 *		['content'] string The content of the requested url. In case the request had to be retried, this will only
-	 *			contain the final content. Will be set to null if request failed indefinately.
-	 *		['headers'] array The headers of the final content. Will be set to null if request failed indefinately.
-	 *		['historyFileName'] string This will be present if settings['saveDataDir'] is set and will be the filename
-	 *			with path of the generated file.
-	 *		['error'] string In case the request failed indefinately this will be set to a string explaining the error.
-	 * * @see loadSingle* ]*/
-	public static function loadSingleStatic($url,$formdata=null,$settings=[],$historyData=[]) {
-		return Hicurl::loadSingleReal(curl_init(),null,$url,$formdata,$settings+Hicurl::$defaultSettings,$historyData);
+	 * @param array $settings Optional parameter of settings that will be merged with the settings of the instance for
+	 *		the duration of this call only. See Hicurl->settings() for explenation on the settings. The settings that
+	 *		may be passed to that function are identical to those that may be passed to this.
+	 * @param array $history Associative array of various settings used for the history-writing which will only be
+	 *		used if settings['history'] is set. The following are valid settings for it:<ul>
+	 *			<li>['name']=> string a name for the historypage that will be visible in the history-viewer</li>
+	 *			<li>['id']=> String|Integer|Float An id may be set here which then can be used to refer to this page
+	 *				as a parent of another</li>
+	 *			<li>['parentId']=> String|Integer|Float The id of another page may be set here to refer to it as the
+	 *				parent of this page</li>
+	 *			<li>['customData']=> mixed This may be set to anything that is json-friendly. It will be assigned to the
+	 *			root of the page-object in the final, compiled json-object with the same name e.g. 'customData'.</li>
+	 *		</ul>
+	 * @return array An associative array with the following elements: <ul>
+	 *		<li>['content'] string The content of the requested url. In case the request had to be retried, this will
+	 *			only contain the final content. Will be set to null if request failed indefinately.</li>
+	 *		<li>['headers'] array The headers that go with the above content. Null if request failed indefinately.</li>
+	 *		<li>['error'] string Description of the error in case the request failed indefinately.</li>
+	 * </ul>
+	 * @see loadSingleStatic*/
+	public static function loadSingleStatic($url,$formdata=null,$settings=[],$history=[]) {
+		return Hicurl::loadSingleReal(curl_init(),null,$url,$formdata,
+				($settings?$settings:[])+Hicurl::$defaultSettings,$history);
 	}
-	private static function loadSingleReal($curlHandler,$historyFileObject,$url,$formdata,$settings,$historyData) {
-		curl_setopt_array($curlHandler, Hicurl::generateCurlOptions($url, $formdata));
+	
+	/**The method which both loadSingle and loadSingleStatic calls, and which is the "real" loading-function
+	 * @param resource $curlHandler
+	 * @param SplFileObject|null $historyFileObject The instance method loadSingle may pass its existing fileObject
+	 * @param string $url Url to load, obviously
+	 * @param array|null $formdata If null request is sent as GET, otherwise POST and with the postdata of this argument
+	 * @param array $settings See parameter $settings of loadSingle()
+	 * @param array $history See parameter $history of loadSingle()
+	 * @return array ['content' string,'headers' array,'error' string|null]
+	 */
+	private static function loadSingleReal($curlHandler,$historyFileObject,$url,$formdata,$settings,$history=null) {
 		$numRetries=-1;
+		curl_setopt_array($curlHandler, Hicurl::generateCurlOptions($url, $formdata));
 		$output=[];
 		if ($historyFileObject||!empty($settings['history'])) {//should we write history?
 			//see description of writeHistory() for explanation of the history-structure
 			$historyPage=[
 				'formData'=>$formdata,
 				'exchanges'=>[]
-			]+$historyData;
+			];
+			if ($history)//add customData and name of the $history-parameter to $historyPage
+				$historyPage+=array_intersect_key($history,array_flip(['customData','name']));
 		}
 		do {
 			if (++$numRetries) {
@@ -238,7 +265,7 @@ class Hicurl {
 			$content=curl_exec($curlHandler);//do the actual request. assign response-content to $content
 			$headers=curl_getinfo($curlHandler);//get the headers too
 			$error=Hicurl::parseAndValidateResult($content,$headers,$settings,$output['domXpath']);
-			if (isset($historyPage)) {//are we writing history-data? this var is only set if we do
+			if (isset($historyPage)) {//are we writing history-data? this var is only set if we are
 				$historyPage['exchanges'][]=[
 					'content'=>$content,
 					'headers'=>$headers,
@@ -247,7 +274,7 @@ class Hicurl {
 			}
 		} while ($error);//keep looping until $error is false
 		if (isset($historyPage)) {//should we write history?
-			Hicurl::writeHistory($historyFileObject, $historyPage, $settings, $historyData);
+			Hicurl::writeHistory($historyFileObject, $historyPage, $settings, $history);
 		}
 		return $output+=[
 			'content'=>$content,
@@ -336,9 +363,12 @@ class Hicurl {
 	 *		the final, compiled json-object with the same name("customData")
 	 * @return boolean Returns true for success*/
 	public function compileHistory($historyOutput=null,$customData=null) {
-		$historyInput=$this->historyFileObject;
+		//$this->historyFileObject needs to be unset so that gzip can remove the input file as its supposed to.
+		//and we can't save it to a local variable and then remove it from instance and call compile with local, since
+		//this local variable in this function will still be holdig it then.
+		$historyFilePath=$this->historyFileObject->getPathname();
 		$this->historyFileObject=null;
-		Hicurl::compileHistoryStatic($historyInput, $historyOutput,$customData);
+		Hicurl::compileHistoryStatic($historyFilePath, $historyOutput,$customData);
 	}
 	
 	/**Compiles the history-file. This is to be done when the writing to the history-file is complete.
@@ -358,8 +388,7 @@ class Hicurl {
 		//i.e.
 		//{"pages":[{"exchanges":[{"content":"foobar","headers":{"http_code":200}}]}{"numPages":1,"idIndices":[]}29
 		//(the outer bracket&brace aren't closed)
-		if (gettype($historyInput)=="string")
-			$historyInput=new SplFileObject($historyInput,'c+');
+		$historyInput=new SplFileObject($historyInput,'c+');
 		Hicurl::seekHistoryFileTempData($historyInput);
 		$ending=']';
 		if ($customData) {
@@ -394,8 +423,7 @@ class Hicurl {
 				rename ($inputFile.'.gz', $outputFile);
 			}
 			$response=exec($command, $output, $return_var);
-			$a=unlink ($inputFile);
-			if ($return_var==0)//success!
+			if ($return_var!==1)//success!
 				return true;
 		}
 		//Hopefully the block above ended this function with a return statement, but otherwise fall back on below code

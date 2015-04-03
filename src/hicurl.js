@@ -19,11 +19,11 @@ function Hicurl(domElement,dataUrl) {
 	var center=component(domElement,"region:'center',title:'',iconCls:'icon-ok'");
 	var centerLayout=component(center,"fit:true",null,"easyui-layout");
 	this._jsonPanel=component(centerLayout,"region:'center',title:'JSON'",{height:"50%"});
-	var contentPanel=component(centerLayout,"region:'south',title:'',split:true",{height:"50%"});
-	var contentTabs=this._contentTabs=component(contentPanel,null,{width:"100%"},"easyui-tabs content");
-	component(contentTabs,"selected: false").title="Content";
+	var contentPanel=component(centerLayout,"region:'south',title:'',split:true",{height:"50%",overflow:"hidden"},"contentPanel");
+	this._contentTabs=component(contentPanel,"fit:true",null,"easyui-tabs content");
+	component(this._contentTabs,"selected: false").title="Content";
 	$.parser.parse();
-	$(contentTabs).tabs('disableTab', 0);
+	$(this._contentTabs).tabs('disableTab', 0);
 		
 	function component(parent,options,style,className,title) {
 		var component=document.createElement("div");
@@ -56,21 +56,25 @@ Hicurl.prototype._historyLoadedHandler=function(event){
 	setTimeout($.parser.parse);
 };
 Hicurl.prototype._pageClick=function(node) {
-	var pageClone=JSON.parse(JSON.stringify(this._data.pages[node.index]));
-	for (var i=0; i<pageClone.exchanges.length; i++) {
-		pageClone.exchanges[i].content="&lt;content&gt;";
+	//remove all content-tabs(except from the very left one with the title of "Content", which actuallt is a tab too
+	while ($(this._contentTabs).tabs('getTab',1))
+		$(this._contentTabs).tabs('close',1);
+	
+	var pageDataClone=JSON.parse(JSON.stringify(this._data.pages[node.index]));
+	for (var i=0; i<pageDataClone.exchanges.length; i++) {
+		pageDataClone.exchanges[i].content="&lt;content&gt;";
 	}
-	var opts={indent_char:"  "};//tabs don't work in textareas with nowrap-setting
+	//tabs don't work in textareas with nowrap-setting(whitespace in general is limited)
+	var opts={indent_char:" "};//...so using non-breaking-space instead
 $(this._jsonPanel).jstree({
 	core : {
-		data:Hicurl._jstreeFormat(pageClone,node.text)
+		data:Hicurl._jstreeFormat(pageDataClone,node.text)
 	} });
 	var exchanges=this._data.pages[node.index].exchanges;
 	for (var i=0; i<exchanges.length; i++) {
 		var textArea=tt=document.createElement("textArea");
 		textArea.value=html_beautify(exchanges[i].content,opts);
 		textArea.readOnly = true;
-		textArea.className="pageContent";
 		$(this._contentTabs).tabs('add',{
 			title: !exchanges[i].error?"Success":exchanges[i].error,
 			selected: true,

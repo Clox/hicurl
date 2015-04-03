@@ -70,24 +70,26 @@ body {
 			}
 		}
 	}
-	.tabs-disabled.tabs-first {
-		opacity:1;
-		visibility: hidden;
-		>a>span {
-			visibility: visible;
+	.contentPanel {
+		.tabs-disabled.tabs-first {
+			opacity:1;
+			visibility: hidden;
+			>a>span {
+				visibility: visible;
+			}
+		}
+		.panel-body {
+			overflow:hidden;
+			>textarea {
+				border:0;
+				padding:0;
+				width:100%;
+				height:100%;
+				resize:none;
+				white-space: nowrap;
+			}
 		}
 	}
-	textArea.pageContent {
-		border:0;
-		padding:0;
-		width:100%;
-		position:absolute;
-		top:31px;
-		bottom:0;
-		resize:none;
-		white-space: nowrap;
-	}
-	
 	//The "Content"-text in the bottom right panel is actually not some title-element, but a tab. That is done to save
 	//some screen realestate, otherwise there would be one more fat bar. The block below is for that "title-tab"
 	.tabs-disabled.tabs-first>a {

@@ -6,7 +6,7 @@ $hicurl->loadSingle('https://www.random.org/integers/?num=1&min=1&max=100&col=1&
 	[
 		'xpathValidate'=>[
 			'expression'=>'//*[@id="invisible"]/pre/text()',
-			'compare'=>'x>80'
+			'compare'=>'x>75'
 		],
 		'maxFruitlessRetries'=>20,
 		'fruitlessPassDelay'=>0,	

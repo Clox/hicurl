@@ -65,20 +65,21 @@ body {
 .hicurl .jstree .jstree-themeicon-custom.html:after {
   content: "< >";
 }
-.hicurl .tabs-disabled.tabs-first {
+.hicurl .contentPanel .tabs-disabled.tabs-first {
   opacity: 1;
   visibility: hidden;
 }
-.hicurl .tabs-disabled.tabs-first > a > span {
+.hicurl .contentPanel .tabs-disabled.tabs-first > a > span {
   visibility: visible;
 }
-.hicurl textArea.pageContent {
+.hicurl .contentPanel .panel-body {
+  overflow: hidden;
+}
+.hicurl .contentPanel .panel-body > textarea {
   border: 0;
   padding: 0;
   width: 100%;
-  position: absolute;
-  top: 31px;
-  bottom: 0;
+  height: 100%;
   resize: none;
   white-space: nowrap;
 }
