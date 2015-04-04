@@ -362,8 +362,7 @@ class Hicurl {
 	/**Compiles the history-file. This is to be done when the writing to the history-file is complete.
 	 * This essentialy puts the file in a closed state, gzipping it while also optionally adding extra data.
 	 * @param string|null $historyOutput A filepath-string to the file to be created. This may be omitted in which case
-	 *		the output-file will be generated in the same directory as the input-file, with the same name but with
-	 *		".gz" added at the end.
+	 *		the output-file will be the same as the input.
 	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
 	 *		the final, compiled json-object with the same name("customData")
 	 * @return boolean Returns true for success*/
@@ -412,6 +411,8 @@ class Hicurl {
 	/**Compress input-file with gzip encoding
 	 * @param string $historyFilePath*/
 	private static function compressHistoryFile($inputFile,$outputFile=null,$writeToFile=true) {
+		if (!$outputFile)
+			$outputFile=$inputFile;
 		//We want to use system gzip via exec(), and only if that fails fall back on php gzencode()
 		//is exec() available?
 		//this should also check whether exec is in ini_get('disable_functions') and whether safemode is on
@@ -422,14 +423,16 @@ class Hicurl {
 					.'gzip -f -q ';//--force is for forcing overwrite if output-file already exist
 			//if (!$writeToFile) $command.=' --stdout';
 			$command.='"'.realpath($inputFile).'"';
-			if ($outputFile) {
-				//the reason why rename is used rather than passing an output-file to the gzip-call with > is that that
-				//doesn't work if input and output are the same, but it works with rename.
-				rename ($inputFile.'.gz', $outputFile);
-			}
 			$response=exec($command, $output, $return_var);
-			if ($return_var!==1)//success!
+			
+			if ($return_var!==1) {//success!
+				if ($outputFile!=$inputFile.'.gz') {
+					//the reason why rename is used rather than passing an output-file to the gzip-call with > is that that
+					//doesn't work if input and output are the same, but it works with rename.
+					rename ($inputFile.'.gz', $outputFile);
+				}
 				return true;
+			}
 		}
 		//Hopefully the block above ended this function with a return statement, but otherwise fall back on below code
 		
