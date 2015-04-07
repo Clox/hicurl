@@ -256,7 +256,7 @@ class Hicurl {
 	 * @return array ['content' string,'headers' array,'error' string|null]*/
 	private static function loadSingleReal($curlHandler,$historyFileObject,$url,$formdata,$settings,$history=null) {
 		$numRetries=-1;
-		curl_setopt_array($curlHandler, Hicurl::generateCurlOptions($url, $formdata));
+		curl_setopt_array($curlHandler, Hicurl::generateCurlOptions($url, $formdata,$settings));
 		$output=[];
 		if ($historyFileObject||!empty($settings['history'])) {//should we write history?
 			//see description of writeHistory() for explanation of the history-structure
@@ -514,7 +514,7 @@ class Hicurl {
 			//CURLOPT_PROXY=>'127.0.0.1:8888'
 		];
 		if (!empty($settings['cookie'])) {
-			$curlOptions[CURLOPT_COOKIEFILE]=$curlOptions[CURLOPT_COOKIEJAR]=$settings->cookie;
+			$curlOptions[CURLOPT_COOKIEFILE]=$curlOptions[CURLOPT_COOKIEJAR]=$settings['cookie'];
 		}
 		if (isset($formdata)) {
 			$curlOptions[CURLOPT_POST]=true;
