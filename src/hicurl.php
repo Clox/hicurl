@@ -378,6 +378,7 @@ class Hicurl {
 	 * @param DOMNode $x The node that the comparison-expression is evaluated against.
 	 * @return boolean Returns false if any of the conditions are false, otherwise true.*/
 	private static function xcompare($expressions,$x) {
+		$x=(float)$x;
 		$expressions=explode("&&", $expressions);
 		foreach ($expressions as $expression) {
 			preg_match('/x(==|<=|>=|<|>)([\d+.]+)/',$expression,$matches);
