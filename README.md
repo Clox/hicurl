@@ -82,7 +82,7 @@ $hicurl->loadSingle("www.facebook.com");
 //When we are done writing to the file we need to "compile it".
 //This puts it in a closed state, and also compresses it.
 //This is the state it is sent to the client in.
-$hicurl->compileHistory()
+$hicurl->compileHistory();
 ````
 ###Sending history
 There's some easy job to be done for sending the data to the client. Here's one way of doing it:
@@ -100,16 +100,22 @@ We need to load some files to use it and then write a tiny bit more code.
 ````html
     <!--This is the js "class" used for viewing the history-->
     <script src="hicurl/src/hicurl.js"></script>
+    
     <!--...it needs this css-file to display things correctly-->
     <link rel="stylesheet" type="text/css" href="hicurl/src/hicurl.css">
+    
     <!--It also required jQuery-->
     <script src="hicurl/src/libs/jquery-1.11.2.min.js"></script>
+    
     <!--.And jquery easy UI-->
     <script src="hicurl/src/libs/jquery.easyui.min.js"></script>
+    
     <!--...along with it's css-file-->
     <link rel="stylesheet" type="text/css" href="../../src/libs/easyui.css">
+    
     <!--This can optionally be included and will make html-code display better-->
     <script src="hicurl/src/libs/beautify-html.js"></script>
+    
     <!--Now for initiating the class-->
     <script>
     //it expects a DOM-element in its first parameter, where everything will be rendered unto.

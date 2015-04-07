@@ -1,0 +1,22 @@
+{
+    "name": "clox/hicurl",
+    "type": "library",
+    "description": "hicurl is an object-oriented wrapper of the PHP cURL extension.\n
+		It's main feature however is the ability to save requested pages and it also includes a javascript \"class\" for viewing the saved data.",
+    "keywords": ["log","logging","cURL","history","save"],
+    "homepage": "https://github.com/Clox/hicurl",
+    "authors": [
+        {
+            "name": "Oscar Jonsson",
+            "email": "ogggan@gmail.com",
+            "homepage": "https://en.gravatar.com/oggan",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+    },
+    "autoload": {
+        "psr-0": {
+        }
+    }
+}
