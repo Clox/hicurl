@@ -72,7 +72,7 @@ $(this._jsonPanel).jstree({
 	var exchanges=this._data.pages[node.index].exchanges;
 	for (var i=0; i<exchanges.length; i++) {
 		var textArea=document.createElement("textArea");
-		//textArea.value=html_beautify(exchanges[i].content,opts);
+		textArea.value=exchanges[i].content,opts;//textArea.value=html_beautify(exchanges[i].content,opts);
 		textArea.readOnly = true;
 		$(this._contentTabs).tabs('add',{
 			title: !exchanges[i].error?"Success":exchanges[i].error.split("\n")[0],
