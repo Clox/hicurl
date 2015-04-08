@@ -1,16 +1,19 @@
-<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN"
-		"http://www.w3.org/TR/html4/strict.dtd">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
 		<html>
 		  <head>
 			<meta http-equiv="content-type" content="text/html; charset=utf-8">
 			<title>Hicurl Test</title>
-			<link rel="stylesheet" type="text/css" href="../../src/hicurl.css">
-			<script src="../../src/libs/jquery-1.11.2.min.js"></script><!--Hicurl requires jquery-->
-			<script src="../../src/hicurl.js"></script>
-			<script src="assets/getHistory.js"></script>
-			<script src="../../src/libs/jquery.easyui.min.js"></script>
-			<script src="../../src/libs/beautify-html.js"></script>
-			<link rel="stylesheet" type="text/css" href="../../src/libs/easyui.css">
+			<link rel="stylesheet" type="text/css" href="../../src/hicurl-public/hicurl.css">
+			<script src="../../src/hicurl-public/libs/jquery-1.11.2.min.js"></script><!--Hicurl requires jquery-->
+			<script src="../../src/hicurl-public/hicurl.js"></script>
+			<script>
+				$(function() {
+					hicurl=new Hicurl(document.body,"assets/getHistory.php");
+				});
+			</script>
+			<script src="../../src/hicurl-public/libs/jquery.easyui.min.js"></script>
+			<script src="../../src/hicurl-public/libs/beautify-html.js"></script>
+			<link rel="stylesheet" type="text/css" href="../../src/hicurl-public/libs/easyui.css">
 			<style>
 				html,body {
 					height:100%;

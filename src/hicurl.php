@@ -444,7 +444,7 @@ class Hicurl {
 		//(the outer bracket&brace aren't closed)
 		$historyInput=new SplFileObject($historyInput,'c+');
 		Hicurl::seekHistoryFileTempData($historyInput);
-		$historyInput->fwrite(',"customData":'.json_encode($customData).'}');
+		$historyInput->fwrite('],"customData":'.json_encode($customData).'}');
 		$historyInput->ftruncate($historyInput->ftell());
 		
 		$historyInputPath=$historyInput->getRealPath();
