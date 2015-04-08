@@ -4,9 +4,8 @@ function Hicurl(domElement,dataUrl) {
 	$.ajax({
         url : dataUrl,
         dataType : 'json',
-        context : this,
-        complete : this._historyLoadedHandler
-    });
+        context : this
+    }).done(this._historyLoadedHandler);
 	
 	//load jstree for viewing json with
 	$.getScript("https://cdnjs.cloudflare.com/ajax/libs/jstree/3.1.0/jstree.min.js");
@@ -36,8 +35,8 @@ function Hicurl(domElement,dataUrl) {
 	}
 }
 
-Hicurl.prototype._historyLoadedHandler=function(event){
-	var pages=(this._data=event.responseJSON).pages;
+Hicurl.prototype._historyLoadedHandler=function(data){
+	var pages=(this._data=data).pages;
 	var treeData=[];
 	for (var i=0; i<pages.length; i++) {
 		var treeItem=treeData[i]={};
@@ -73,7 +72,7 @@ $(this._jsonPanel).jstree({
 	var exchanges=this._data.pages[node.index].exchanges;
 	for (var i=0; i<exchanges.length; i++) {
 		var textArea=document.createElement("textArea");
-		textArea.value=html_beautify(exchanges[i].content,opts);
+		//textArea.value=html_beautify(exchanges[i].content,opts);
 		textArea.readOnly = true;
 		$(this._contentTabs).tabs('add',{
 			title: !exchanges[i].error?"Success":exchanges[i].error.split("\n")[0],
