@@ -550,11 +550,24 @@ class Hicurl {
 	
 	/**
 	 * Writes history to the output-buffer.
-	 * @param string $historyPath Path of the compiled history-file.*/
-	public static function serveHistory($historyPath) {
+	 * @param string $historyPath Path of the compiled history-file.
+	 * @param int|bool $cache Controls browser-caching of the history-file. Possible values are false for no caching,
+	 * true(default) for caching of 365 days or an integer specifying cache max-age in seconds.*/
+	public static function serveHistory($historyPath,$cache=true) {
 		ini_set('zlib.output_compression','Off');
 		$HTTP_ACCEPT_ENCODING = $_SERVER["HTTP_ACCEPT_ENCODING"]; 
-		header('Cache-Control: max-age=29030400, public');
+		
+		if ($cache) {
+			if ($cache===true)
+				$cache=31536000;
+			header("Cache-Control: max-age=$cache, public");
+		} else {
+			header("Cache-Control: no-cache, must-revalidate"); //HTTP 1.1
+			header("Pragma: no-cache"); //HTTP 1.0
+			header("Expires: Sat, 26 Jul 1997 05:00:00 GMT"); // Date in the past
+		}
+			
+		
 		if(headers_sent()) 
 			$encoding = false; 
 		else if(strpos($HTTP_ACCEPT_ENCODING, 'x-gzip') !== false)
