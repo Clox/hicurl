@@ -63,10 +63,10 @@ class Hicurl {
 	 *			is less than this value then it will be split into groups at the size of this.</li>
 	 *		<li>'cookie'	string If this is set to a path to a file then cookies will be saved to that file, and those cookies
 	 *			will also be sent on each request. Ex: dirname(__FILE__).'/cookie.txt</li>
-	 *		<li>'retryOnNull' boolean If true then load-calls will retry requests when response-content is null.</li>
-	 *		<li>'retryOnIncompleteHTML' boolean if true then load-calls will retry requests when response	doesn't end
+	 *		<li>'retryOnNull' bool If true then load-calls will retry requests when response-content is null.</li>
+	 *		<li>'retryOnIncompleteHTML' bool if true then load-calls will retry requests when response	doesn't end
 	 *			with a HTML closing tag (That is "&lt/html&gt") with possible following whitespace.</li>
-	 *		<li>'xpath' array|array[]|boolean Setting for doing xpath-validation.
+	 *		<li>'xpath' array|array[]|bool Setting for doing xpath-validation.
 	 *			It expects an xpath-object in the following format:<br>
 	 *			['expression'=>string,'error'=>string,'compare'=>string]
 	 *			<ul>
@@ -75,7 +75,7 @@ class Hicurl {
 	 *				<li>'compare' string An optional string specifying comparison-condition(s) the fetched value needs
 	 *					to meet. Normally with xpath one could do something like '//*[@id="myNumer"]/span>5' but php's
 	 *					xpath implementation doesn't support such operations, and can only return nodes, and not
-	 *					booleans, ints, etc. If any of these conditions are false then the request is considered failed.
+	 *					bools, ints, etc. If any of these conditions are false then the request is considered failed.
 	 *					Some example values:
 	 *					<ul>
 	 *						<li>'x>5' - The value needs to be higher than 5</li>
@@ -303,7 +303,7 @@ class Hicurl {
 	 * @param array $headers Headers-array belongin to the content.
 	 * @param array $settings The current state of settings.
 	 * @param &DOMXPath $domXpath The DOMXPath-object will be set to this out argument if settings->xpath is set.
-	 * @return boolean|string Returns false if no error was encountered, otherwise a string describing the error.*/
+	 * @return bool|string Returns false if no error was encountered, otherwise a string describing the error.*/
 	private static function parseAndValidateResult(&$content,$headers, $settings,&$outputArray) {
 		if (ord($content[0])==0x1f && ord($content[1])==0x8b) {
 			$content=gzdecode($content);
@@ -334,7 +334,7 @@ class Hicurl {
 	 * @param array $xpathObject The array from $settings['xpath']
 	 * @param string $pageContent The content of the page
 	 * @param array $outputArray A reference to the array which is to be returned by the load-call.
-	 * @return boolean|string $outputArray Returns error string on failure, e.g. if not all xpaths matches at least one
+	 * @return bool|string $outputArray Returns error string on failure, e.g. if not all xpaths matches at least one
 	 * node each, or if any of the comparators evaluates to false on any of their matched nodes.
 	 * Otherwise it returns false for no error.
 	 */
@@ -376,7 +376,7 @@ class Hicurl {
 	 *		The value needs to be less than 5. Other comparison-operators are >,<=,>= and ==. Multiple conditions can
 	 *		be used by separating them with &&.
 	 * @param DOMNode $x The node that the comparison-expression is evaluated against.
-	 * @return boolean Returns false if any of the conditions are false, otherwise true.*/
+	 * @return bool Returns false if any of the conditions are false, otherwise true.*/
 	private static function xcompare($expressions,$x) {
 		$x=(float)$x;
 		$expressions=explode("&&", $expressions);
@@ -414,14 +414,18 @@ class Hicurl {
 	 *		the output-file will be the same as the input.
 	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
 	 *		the final, compiled json-object with the same name("customData")
-	 * @return boolean Returns true for success*/
-	public function compileHistory($historyOutput=null,$customData=null) {
-		//$this->historyFileObject needs to be unset so that gzip can remove the input file as its supposed to.
-		//and we can't save it to a local variable and then remove it from instance and call compile with local, since
-		//this local variable in this function will still be holdig it then.
+	 * @param bool $keepInputFile If this is set to true then the uncompiled input-file will not be deleted. An example
+	 *		of a useful case for this would be if daily history-files are generated, and one would like to view the
+	 *		history so far of today.
+	 * @return bool Returns true for success*/
+	public function compileHistory($historyOutput=null,$customData=null,$keepInputFile=false) {
+		//$this->historyFileObject needs to be unset so that gzip can remove the input file as its supposed to(unless
+		//$keepInputFile is set to true), and we can't save it to a local variable and then remove it from instance
+		//and call compile with local, since this local variable in this function will still be holdig it then which
+		//would prevent the file from getting removed.
 		$historyFilePath=$this->historyFileObject->getPathname();
 		$this->historyFileObject=null;
-		Hicurl::compileHistoryStatic($historyFilePath, $historyOutput,$customData);
+		Hicurl::compileHistoryStatic($historyFilePath, $historyOutput,$customData,$keepInputFile);
 	}
 	
 	/**
@@ -435,9 +439,13 @@ class Hicurl {
 	 *		".gz" added at the end.
 	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
 	 *		the final, compiled json-object with the same name("customData")
-	 * @return boolean Returns true for success*/
-	public static function compileHistoryStatic($historyInput,$historyOutput=null,$customData=null) {
-		//At this point the history should be formated as:
+	 * @param bool $keepInputFile If this is set to true then the uncompiled input-file will not be deleted. An example
+	 *		of a useful case for this would be if daily history-files are generated, and one would like to view the
+	 *		history so far of today.
+	 * @return bool Returns true for success*/
+	public static function compileHistoryStatic($historyInput,$historyOutput=null,$customData=null
+			,$keepInputFile=false) {
+		//At this point the history should be formatted as:
 		//{"pages":[page1{},page2{}+tempData+tempDataSize
 		//i.e.
 		//{"pages":[{"exchanges":[{"content":"foobar","headers":{"http_code":200}}]}{"numPages":1,"idIndices":[]}29
@@ -450,14 +458,15 @@ class Hicurl {
 		$historyInputPath=$historyInput->getRealPath();
 		$historyInput=null;//remove the reference to the file so that gzip can delete it as supposed to
 		
-		Hicurl::compressHistoryFile($historyInputPath,$historyOutput);
+		Hicurl::compressHistoryFile($historyInputPath,$historyOutput,$keepInputFile);
 	}
 	
 	/**
 	 * Compress input-file with gzip encoding
 	 * @param string $historyFilePath The path of the input-file
-	 * @param string|null $outputFile Path for the output. If omitted then the same as input is used.*/
-	private static function compressHistoryFile($inputFile,$outputFile=null) {
+	 * @param string|null $outputFile Path for the output. If omitted then the same as input is used.
+	 * @param bool $keepInputFile Whether the input-file should be deleted or kept*/
+	private static function compressHistoryFile($inputFile,$outputFile,$keepInputFile) {
 		if (!$outputFile)
 			$outputFile=$inputFile;
 		//We want to use system gzip via exec(), and only if that fails fall back on php gzencode()
@@ -467,7 +476,9 @@ class Hicurl {
 			//if system is windows then there is no native gzip-command, which is why we cd into src-folder where
 			//gzip.exe should be located, which will be used in that case. separate commands with ;
 			$command='cd "'.__DIR__.'" && '//cd to same folder as this very file
-					.'gzip -f -q ';//--force is for forcing overwrite if output-file already exist
+					.'gzip --force --quiet ';//--force is for forcing overwrite if output-file already exist
+			if ($keepInputFile)
+				$command.="--keep ";
 			//if (!$writeToFile) $command.=' --stdout';
 			$command.='"'.realpath($inputFile).'"';
 			$response=exec($command, $output, $return_var);
@@ -528,7 +539,7 @@ class Hicurl {
 	
 	/**
 	 * Writes history to the output-buffer.
-	 * @param string $historyPath Path of the compiled histor-file.*/
+	 * @param string $historyPath Path of the compiled history-file.*/
 	public static function serveHistory($historyPath) {
 		ini_set('zlib.output_compression','Off');
 		$HTTP_ACCEPT_ENCODING = $_SERVER["HTTP_ACCEPT_ENCODING"]; 

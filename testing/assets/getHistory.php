@@ -1,3 +1,3 @@
 <?php
 require_once '../../src/hicurl.php';
-Hicurl::serveHistory('../data/history.txt');
+Hicurl::serveHistory('../data/history.gz');
