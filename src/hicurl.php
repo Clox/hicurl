@@ -416,7 +416,7 @@ class Hicurl {
 	 *		the final, compiled json-object with the same name("customData")
 	 * @param bool $keepInputFile If this is set to true then the uncompiled input-file will not be deleted. An example
 	 *		of a useful case for this would be if daily history-files are generated, and one would like to view the
-	 *		history so far of today.
+	 *		history so far of today. For this to work $historyOutput needs to be set.
 	 * @return bool Returns true for success*/
 	public function compileHistory($historyOutput=null,$customData=null,$keepInputFile=false) {
 		//$this->historyFileObject needs to be unset so that gzip can remove the input file as its supposed to(unless
@@ -441,7 +441,7 @@ class Hicurl {
 	 *		the final, compiled json-object with the same name("customData")
 	 * @param bool $keepInputFile If this is set to true then the uncompiled input-file will not be deleted. An example
 	 *		of a useful case for this would be if daily history-files are generated, and one would like to view the
-	 *		history so far of today.
+	 *		history so far of today. For this to work $historyOutput needs to be set.
 	 * @return bool Returns true for success*/
 	public static function compileHistoryStatic($historyInput,$historyOutput=null,$customData=null
 			,$keepInputFile=false) {
@@ -450,7 +450,15 @@ class Hicurl {
 		//i.e.
 		//{"pages":[{"exchanges":[{"content":"foobar","headers":{"http_code":200}}]}{"numPages":1,"idIndices":[]}29
 		//(the outer bracket&brace aren't closed)
-		$historyInput=new SplFileObject($historyInput,'c+');
+		
+		if ($keepInputFile) {
+			//can't use tmpfile() or SplTempFileObject because we can't get a path from those
+			//to feed to exec in compressHistoryFile() so tempnam() is used instead.
+			$tempFile=tempnam(dirname($historyInput) , 'hicurlHistory');
+			copy ($historyInput,$tempFile);
+			$historyInput=$tempFile;
+		}
+		$historyInput=new SplFileObject($historyInput,'r+');
 		Hicurl::seekHistoryFileTempData($historyInput);
 		$historyInput->fwrite('],"customData":'.json_encode($customData).'}');
 		$historyInput->ftruncate($historyInput->ftell());
@@ -458,35 +466,38 @@ class Hicurl {
 		$historyInputPath=$historyInput->getRealPath();
 		$historyInput=null;//remove the reference to the file so that gzip can delete it as supposed to
 		
-		Hicurl::compressHistoryFile($historyInputPath,$historyOutput,$keepInputFile);
+		Hicurl::compressHistoryFile($historyInputPath,$historyOutput);
 	}
 	
 	/**
 	 * Compress input-file with gzip encoding
 	 * @param string $historyFilePath The path of the input-file
-	 * @param string|null $outputFile Path for the output. If omitted then the same as input is used.
-	 * @param bool $keepInputFile Whether the input-file should be deleted or kept*/
-	private static function compressHistoryFile($inputFile,$outputFile,$keepInputFile) {
+	 * @param string|null $outputFile Path for the output. If omitted then the same as input is used.*/
+	private static function compressHistoryFile($inputFile,$outputFile) {
 		if (!$outputFile)
 			$outputFile=$inputFile;
 		//We want to use system gzip via exec(), and only if that fails fall back on php gzencode()
 		//is exec() available?
 		//this should also check whether exec is in ini_get('disable_functions') and whether safemode is on
 		if(function_exists('exec')) {
+			
+			//if input-file has extension gz already, even if it isn't compressed then gzip refuses to compress it
+			if (pathinfo($inputFile, PATHINFO_EXTENSION)=='gz') {
+				rename($inputFile, $inputFile=substr($inputFile,0,-3));
+			}
+			
 			//if system is windows then there is no native gzip-command, which is why we cd into src-folder where
 			//gzip.exe should be located, which will be used in that case. separate commands with ;
 			$command='cd "'.__DIR__.'" && '//cd to same folder as this very file
 					.'gzip --force --quiet ';//--force is for forcing overwrite if output-file already exist
-			if ($keepInputFile)
-				$command.="--keep ";
 			//if (!$writeToFile) $command.=' --stdout';
 			$command.='"'.realpath($inputFile).'"';
 			$response=exec($command, $output, $return_var);
 			
 			if ($return_var!==1) {//success!
 				if ($outputFile!=$inputFile.'.gz') {
-					//the reason why rename is used rather than passing an output-file to the gzip-call with > is that that
-					//doesn't work if input and output are the same, but it works with rename.
+					//the reason why rename is used rather than passing an output-file to the gzip-call with > is that
+					//it doesn't work if input and output are the same, but it works with rename.
 					rename ($inputFile.'.gz', $outputFile);
 				}
 				return true;
