@@ -1,14 +1,14 @@
 function Hicurl(domElement,dataUrl) {
 	this._domElement=domElement;
 	domElement.className+=" hicurl easyui-layout";
-	$.ajax({
-        url : dataUrl,
-        dataType : 'json',
-        context : this
-    }).done(this._historyLoadedHandler);
+	$.when(
+		$.getJSON(dataUrl),
+		
+		//load jstree for viewing json with
+		$.getScript("https://cdnjs.cloudflare.com/ajax/libs/jstree/3.1.0/jstree.min.js")
+	).done($.proxy(this._processDownloadedData,this));
 	
-	//load jstree for viewing json with
-	$.getScript("https://cdnjs.cloudflare.com/ajax/libs/jstree/3.1.0/jstree.min.js");
+	
 	$('head').append( $('<link rel="stylesheet" type="text/css" />')
 			.attr('href', 'https://cdnjs.cloudflare.com/ajax/libs/jstree/3.1.0/themes/default/style.min.css') );
 	
@@ -18,7 +18,8 @@ function Hicurl(domElement,dataUrl) {
 	var center=component(domElement,"region:'center',title:'',iconCls:'icon-ok'");
 	var centerLayout=component(center,"fit:true",null,"easyui-layout");
 	this._jsonPanel=component(centerLayout,"region:'center',title:'JSON'",{height:"50%"});
-	var contentPanel=component(centerLayout,"region:'south',title:'',split:true",{height:"50%",overflow:"hidden"},"contentPanel");
+	var contentPanel=component(centerLayout,"region:'south',title:'',split:true",
+		{height:"50%",overflow:"hidden"},"contentPanel");
 	this._contentTabs=component(contentPanel,"fit:true",null,"easyui-tabs content");
 	component(this._contentTabs,"selected: false").title="Content";
 	$.parser.parse();
@@ -35,8 +36,8 @@ function Hicurl(domElement,dataUrl) {
 	}
 }
 
-Hicurl.prototype._historyLoadedHandler=function(data){
-	var pages=(this._data=data).pages;
+Hicurl.prototype._processDownloadedData=function(dataAjax){
+	var pages=(this._data=dataAjax[0]).pages;
 	var treeData=[{text:"Root",children:[]}];
 	for (var i=0; i<pages.length; i++) {
 		var treeItem=treeData[0].children[i]={};
@@ -71,7 +72,7 @@ Hicurl.prototype._historyLoadedHandler=function(data){
 	
 	//this has to be called otherwise the layout will "sometimes" be a little messed up after the writing to the
 	//pageTree. calling it without the setTimeout doesn't fix it either, at least not always.
-	//But like this it looks like it never gets messed up.
+	//But like this it sees like it never gets messed up.
 	setTimeout($.parser.parse);
 };
 Hicurl.prototype._pageClick=function(node) {
