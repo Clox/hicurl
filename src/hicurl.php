@@ -340,7 +340,7 @@ class Hicurl {
 	 */
 	private static function xPath($xpathObject,$pageContent,&$outputArray) {
 		$domDocument=new DOMDocument();
-		$domDocument->loadHTML($pageContent);
+		$domDocument->loadHTML('<meta http-equiv="content-type" content="text/html; charset=utf-8">'.$pageContent);
 		$domXpath=$outputArray['domXPath']=new DOMXPath($domDocument);
 		//if it's set to true then we do not do any validation, but instead just assign domXpath to return-object.
 		//(domXpath is a reference)
