@@ -217,18 +217,19 @@ class Hicurl {
 	 *		<li>['content'] string The content of the requested url. In case the request had to be retried, this will
 	 *			only contain the final content. Will be set to null if request failed indefinately.</li>
 	 *		<li>['headers'] array The headers that go with the above content. Null if request failed indefinately.</li>
-	 *		<li>['error'] string Description of the error in case the request failed indefinately.</li>
+	 *		<li>['error'] string|false Description-string of the error in case the request failed indefinately, or
+	 *			false if it succeeded. Like the other values, this only applies to the last requested page in case
+	 *			of failures and retries.</li>
 	 * </ul>
 	 * @see loadSingleStatic()*/
 	public function loadSingle($url,$formdata=null,$settings=[],$history=[]) {
-		//pass the historyFileObject of this instance if it has one and it doesn't temporarily get overwritten by
-		//the history-item i the $settings-argument
-		$historyFileObject=null;//if the next condition fails then null will be used which will result in
-		//loadSingleReal creating a new, tempoary one if histor is set in $settings
-		if ($this->historyFileObject//if the instance has a fileObject and there's no history-item in the
-		//$settings-argument, or if there is it's setting is the same as the one in the instance-settings
+		//we want pass the historyFileObject of this instance to loadSingleReal if it has one, given it doesn't
+		//(temporarily) getget overwritten by the history-item in the $settings-argument of this function.
+		$historyFileObject=null;//if the next condition fails then null will be passed as history-argument
+		if ($this->historyFileObject//if the instance has a historyFileObject and there's no history-item in the
+		//$settings-argument, or if there is and its setting is the same as the one in settings of the instance
 			&&(!array_key_exists('history', $settings) || $settings['history']==$this->settingsData['history'])) {
-			$historyFileObject=$this->historyFileObject;//then the instance fileObject will be used
+			$historyFileObject=$this->historyFileObject;//...then the instance fileObject will be used
 		}
 			
 		return Hicurl::loadSingleReal($this->curlHandler,$historyFileObject, $url, $formdata,
@@ -257,7 +258,7 @@ class Hicurl {
 	private static function loadSingleReal($curlHandler,$historyFileObject,$url,$formdata,$settings,$history=null) {
 		$numRetries=-1;
 		curl_setopt_array($curlHandler, Hicurl::generateCurlOptions($url, $formdata,$settings));
-		$output=[];
+		$output=[];//this is the array that will be returned
 		if ($historyFileObject||!empty($settings['history'])) {//should we write history?
 			//see description of writeHistory() for explanation of the history-structure
 			$historyPage=[
@@ -292,7 +293,8 @@ class Hicurl {
 		}
 		return $output+=[
 			'content'=>$content,
-			'headers'=>$headers
+			'headers'=>$headers,
+			'error'=>false//(this wont overwrite an error-description if it has been written already)
 		];
 	}
 	
