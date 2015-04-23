@@ -104,6 +104,7 @@ class Hicurl {
 	 *			Enables saving contents/headers of request&responses in a file for later viewing. The value should be a
 	 *			path to a history-file. If it doesn't yet exist it will be created, else it will be appended to.
 	 *			For on the structure of history-files {@see writeHistory()}</li>
+	 *		<li>'tor' bool If true then a proxy on port 9050 willbe used for the requsts.</li>
 	 *	</ul>
 	 * @return array The resulted settings*/
 	public function settings($settings=null) {
@@ -223,8 +224,8 @@ class Hicurl {
 	 * </ul>
 	 * @see loadSingleStatic()*/
 	public function loadSingle($url,$formdata=null,$settings=[],$history=[]) {
-		//we want pass the historyFileObject of this instance to loadSingleReal if it has one, given it doesn't
-		//(temporarily) getget overwritten by the history-item in the $settings-argument of this function.
+		//We want to pass the historyFileObject of this instance to loadSingleReal if it has one, given it doesn't
+		//(temporarily) get overwritten by the history-item in the $settings-argument of this function.
 		$historyFileObject=null;//if the next condition fails then null will be passed as history-argument
 		if ($this->historyFileObject//if the instance has a historyFileObject and there's no history-item in the
 		//$settings-argument, or if there is and its setting is the same as the one in settings of the instance
@@ -257,7 +258,7 @@ class Hicurl {
 	 * @return array ['content' string,'headers' array,'error' string|null]*/
 	private static function loadSingleReal($curlHandler,$historyFileObject,$url,$formdata,$settings,$history=null) {
 		$numRetries=-1;
-		curl_setopt_array($curlHandler, Hicurl::generateCurlOptions($url, $formdata,$settings));
+		Hicurl::setCurlOptions($curlHandler,$url, $formdata,$settings);
 		$output=[];//this is the array that will be returned
 		if ($historyFileObject||!empty($settings['history'])) {//should we write history?
 			//see description of writeHistory() for explanation of the history-structure
@@ -279,6 +280,11 @@ class Hicurl {
 			}
 			$content=curl_exec($curlHandler);//do the actual request. assign response-content to $content
 			$headers=curl_getinfo($curlHandler);//get the headers too
+			if ($headers['http_code']==0&&!empty($settings['tor'])) {
+				$output['error']="Unable to connect via tor-proxy.\nIs Tor installed and configured correctly?";
+				$content=$headers=null;
+				break;
+			}
 			$error=Hicurl::parseAndValidateResult($content,$headers,$settings,$output);
 			if (isset($historyPage)) {//are we writing history-data? this var is only set if we are
 				$historyPage['exchanges'][]=[
@@ -517,12 +523,13 @@ class Hicurl {
 	}
 	
 	/**
-	 * Generates the options that are used for the curl object.
+	 * Generates the options that are used for the curl object and sets them to the curl-handler.
+	 * @param resource $curlHandler The curl-handler that the options should be set to
 	 * @param string $url The url for the request
 	 * @param array|null $formdata If post-request then this should be an associative array of the formdata.
-	 * @param array $settings Current settings-
-	 * @return array Curl-options*/
-	private static function generateCurlOptions($url,$formdata,$settings) {
+	 * @param array $settings Current settings
+	 * @return void*/
+	private static function setCurlOptions($curlHandler,$url,$formdata,$settings) {
 		$curlOptions=[
 			CURLOPT_URL => $url,
 			CURLOPT_RETURNTRANSFER => true,
@@ -534,6 +541,10 @@ class Hicurl {
 		];
 		if (!empty($settings['cookie'])) {
 			$curlOptions[CURLOPT_COOKIEFILE]=$curlOptions[CURLOPT_COOKIEJAR]=$settings['cookie'];
+		}
+		if (!empty($settings['tor'])) {
+			$curlOptions[CURLOPT_PROXY]='127.0.0.1:9050';
+			$curlOptions[CURLOPT_PROXYTYPE]=CURLPROXY_SOCKS5;
 		}
 		if (isset($formdata)) {
 			$curlOptions[CURLOPT_POST]=true;
@@ -547,7 +558,11 @@ class Hicurl {
 		} else if (!empty($settings['getHeaders'])) {
 			$curlOptions[CURLOPT_HTTPHEADER]=$settings['getHeaders'];//10023
 		}
-		return $curlOptions;
+		//By resetting the settings like this it suffices to write settings to $curlOptions depending on what is
+		//*set* in $settings. We don't have to negate effects of settings that are *not set* in $setting
+		curl_reset($curlHandler);
+		
+		curl_setopt_array($curlHandler,$curlOptions);
 	}
 	
 	/**
