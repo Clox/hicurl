@@ -66,37 +66,12 @@ class Hicurl {
 	 *		<li>'retryOnNull' bool If true then load-calls will retry requests when response-content is null.</li>
 	 *		<li>'retryOnIncompleteHTML' bool if true then load-calls will retry requests when response	doesn't end
 	 *			with a HTML closing tag (That is "&lt/html&gt") with possible following whitespace.</li>
-	 *		<li>'xpath' array|array[]|bool Setting for doing xpath-validation.
-	 *			It expects an xpath-object in the following format:<br>
-	 *			['expression'=>string,'error'=>string,'compare'=>string]
-	 *			<ul>
-	 *				<li>'expression' string simply be an xpath-string</li>
-	 *				<li>'error' string optional description of the error if it fails</li>
-	 *				<li>'compare' string An optional string specifying comparison-condition(s) the fetched value needs
-	 *					to meet. Normally with xpath one could do something like '//*[@id="myNumer"]/span>5' but php's
-	 *					xpath implementation doesn't support such operations, and can only return nodes, and not
-	 *					bools, ints, etc. If any of these conditions are false then the request is considered failed.
-	 *					Some example values:
-	 *					<ul>
-	 *						<li>'x>5' - The value needs to be higher than 5</li>
-	 *						<li>'x<=8.5' - The value needs to be lower or equal to 8.5</li>
-	 *						<li>'x==99' - The value needs to be 99</li>
-	 *						<li>'x>5&&x<10' - The value needs to be between 5 and 10</li>
-	 *					</ul>
-	 *				</li>
-	 *			</ul>
-	 *			This will also place some extra data in the array eturned by the load call:
-	 *			<ul>
-	 *				<li>"domXPath" DOMXPath The DOMXPath-object so that the same page doesn't have to be parsed twice
-	 *					if some xpath-work has to be done after retrieval&validation of the page. The value of true
-	 *					may also be passed which will make the xpath-object appear in the returned array, but no
-	 *					xpaths will be evaluated.</li>
-	 *				<li>"xpathNodes" DOMNode[] An indexed array of all fetched nodes,
-	 *					in the same order as they were specified in.
-	 *				</li>
-	 *			</ul>
-	 *			If no compare-value is passed then xpath-validation will succeed as long as it matches as least 1 node.
-	 *			Also, rather than passing one of these xpath-objects, an array of them may be passed.
+	 *		<li>'xpath' string|string[]|true An xpath-expression that needs to evaluate to true or return at least 1
+	 *			node otherwise the request will be deemed unsuccessfull. Rather than a single xpath-expression an array
+	 *			of them may be passed in which case all of them need to evaluate to true for the request to be
+	 *			successfull. This setting will also place a DOMXPATH-object with key "domXPath" in the array returned
+	 *			by the load-call. A value of true may also be passed in which case the DOMXPATH-object will be
+	 *			generated, but no xpath-evaluation will take place.
 	 *		</li>
 	 *		<li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
 	 *		<li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
@@ -221,6 +196,12 @@ class Hicurl {
 	 *		<li>['error'] string|false Description-string of the error in case the request failed indefinately, or
 	 *			false if it succeeded. Like the other values, this only applies to the last requested page in case
 	 *			of failures and retries.</li>
+	 *		<li>['errorCode'] int An error-code integer that goes with ['error']. Like the other values, this only
+	 *			applies to the last requested page in case of failures and retries.
+	 *			<br>Possible values are:<ul>
+	 *			<li>1: Tor-proxy related error</li>
+	 *			</ul>
+	 *		</li>
 	 * </ul>
 	 * @see loadSingleStatic()*/
 	public function loadSingle($url,$formdata=null,$settings=[],$history=[]) {
@@ -255,7 +236,7 @@ class Hicurl {
 	 * @param array|null $formdata If null request is sent as GET, otherwise POST and with the postdata of this argument
 	 * @param array $settings See parameter $settings of loadSingle()
 	 * @param array $history See parameter $history of loadSingle()
-	 * @return array ['content' string,'headers' array,'error' string|null]*/
+	 * @return array ['content' string,'headers' array,'error' string|null,'errorCode']*/
 	private static function loadSingleReal($curlHandler,$historyFileObject,$url,$formdata,$settings,$history=null) {
 		$numRetries=-1;
 		Hicurl::setCurlOptions($curlHandler,$url, $formdata,$settings);
@@ -281,6 +262,7 @@ class Hicurl {
 			$content=curl_exec($curlHandler);//do the actual request. assign response-content to $content
 			$headers=curl_getinfo($curlHandler);//get the headers too
 			if ($headers['http_code']==0&&!empty($settings['tor'])) {
+				$output['errorCode']=1;
 				$output['error']="Unable to connect via tor-proxy.\nIs Tor installed and configured correctly?";
 				$content=$headers=null;
 				break;
@@ -290,7 +272,8 @@ class Hicurl {
 				$historyPage['exchanges'][]=[
 					'content'=>$content,
 					'headers'=>$headers,
-					'error'=>$error
+					'error'=>$error,
+					'errorCode'=>0
 				];
 			}
 		} while ($error);//keep looping until $error is false
@@ -330,89 +313,39 @@ class Hicurl {
 		if ($settings['retryOnIncompleteHTML']&&!preg_match("/<\/html>\s*$/",$content)) {	
 			return 'Cut off HTML';
 		}
-		if (isset($settings['xpath'])) {
-			return Hicurl::xPath($settings['xpath'],$content,$outputArray);
+		if (!empty($settings['xpath'])) {
+			return Hicurl::xPathEvaluate($settings['xpath'],$content,$outputArray);
 		}
 		return false;
 	}
 	
 	/**
-	 * Method that fetches nodes using xpath, runs comparison-expressions on them if instructed, and writes some
-	 * additional data to the array that is to be returned by the load-fuction.
-	 * @param array $xpathObject The array from $settings['xpath']
+	 * Method that does xpath-evaluations if set in settings->xpath. Also placed a DOMXPATH-object in the array
+	 * returned by the load-call.
+	 * @param array $xpath The value of $settings['xpath']
 	 * @param string $pageContent The content of the page
-	 * @param array $outputArray A reference to the array which is to be returned by the load-call.
-	 * @return bool|string $outputArray Returns error string on failure, e.g. if not all xpaths matches at least one
-	 * node each, or if any of the comparators evaluates to false on any of their matched nodes.
-	 * Otherwise it returns false for no error.
-	 */
-	private static function xPath($xpathObject,$pageContent,&$outputArray) {
+	 * @param array $outputArray A reference to the array which is to be returned by the load-call. This is so that
+	 *		the DOMXPATH-object can be placed in it for the convinience of the user, and so that it wont have to be
+	 *		generated twice if any xpath work is to be done on the content returned by the load-call.
+	 * @return false|string $outputArray Returns error string on failure, e.g. if not all xpaths evaluate to true.
+	 * Otherwise it returns false for no error.*/
+	private static function xPathEvaluate($xpath,$pageContent,&$outputArray) {
 		$domDocument=new DOMDocument();
+		//Slap on this meta-tag which sets encoding to utf-8. Otherwise utf8 content gets corrupted. This doesn't seem
+		//to ever do any damage to pages that are not utf8 encoded or already have this tag...
 		$domDocument->loadHTML('<meta http-equiv="content-type" content="text/html; charset=utf-8">'.$pageContent);
 		$domXpath=$outputArray['domXPath']=new DOMXPath($domDocument);
 		//if it's set to true then we do not do any validation, but instead just assign domXpath to return-object.
-		//(domXpath is a reference)
-		if ($xpathObject!==true) {
-			if (isset($xpathObject['expression']))//if this is true it means a single xpath was passed
-				$xpathObject=[$xpathObject];//then put in array for convenience of using the below loop
-			foreach ($xpathObject as $xpath) {
-				$expression=$xpath['expression'];
-				if (isset($xpath['error']))
-					$error=$xpath['error'];
-				else
-					$error="Xpath failure\nThe following xpath failed:".$expression;
-				$nodes=$domXpath->query($expression);
-				if (!$nodes->length)
-					return $error;
-				else {
-					foreach ($nodes as $node) {
-						if ((isset($xpath['compare'])
-								&&!Hicurl::xcompare($xpath['compare'], $node->nodeValue))) {
-							return $error;
-						}
-						$outputArray['xpathNodes'][]=$node;
-					}
-				}
+		if ($xpath!==true) {
+			if (!is_array($xpath))
+				$xpath=[$xpath];//put in array for convenience of using the below loop
+			foreach ($xpath as $expression) {
+				$xpathResult=$domXpath->evaluate($expression);
+				if ($xpathResult===false||($xpathResult instanceof \DOMNodeList &&$xpathResult->length==0))
+					return "Xpath failure\nThe following xpath failed:'$expression'";
 			}
 		}
 		return false;
-	}
-	
-	/**
-	 * Used for validating a value against condition(s), used by xpathValidator if settings->xpathValidate is set.
-	 * @param string $expressions The condition-expression. A conditin example: "x<5".
-	 *		The value needs to be less than 5. Other comparison-operators are >,<=,>= and ==. Multiple conditions can
-	 *		be used by separating them with &&.
-	 * @param DOMNode $x The node that the comparison-expression is evaluated against.
-	 * @return bool Returns false if any of the conditions are false, otherwise true.*/
-	private static function xcompare($expressions,$x) {
-		$x=(float)$x;
-		$expressions=explode("&&", $expressions);
-		foreach ($expressions as $expression) {
-			preg_match('/x(==|<=|>=|<|>)([\d+.]+)/',$expression,$matches);
-			switch ($matches[1]) {
-				case '>':
-					if ($x<=$matches[2])
-						return false;
-				break;
-				case '<':
-					if ($x>=$matches[2])
-						return false;
-				break;
-				case '<=':
-					if ($x>$matches[2])
-						return false;
-				break;
-				case '>=':
-					if ($x<$matches[2])
-						return false;
-				break;
-				case '==':
-					if ($x!=$matches[2])
-						return false;
-			}
-		}
-		return true;
 	}
 	
 	/**
