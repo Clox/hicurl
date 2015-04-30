@@ -93,7 +93,7 @@ class Hicurl {
 
 					//else if it is non null/false and that it isn't equal to what's already set
 				} else if (!isset($this->historyFileObject)||$historyPath!=$this->$historyPath) {
-					$this->historyFileObject=Hicurl::setHistoryFolder($historyPath);
+					$this->historyFileObject=Hicurl::setupHistoryFolder($historyPath);
 				}
 			}
 			//merge supplied settings with current settings of instance
@@ -101,15 +101,20 @@ class Hicurl {
 		}
 		return $this->settingsData;
 	}
-	private static function setHistoryFolder($historyPath) {
-		if (!is_dir($historyPath)) {
-			if (file_exists($historyPath)) {
+	private static function setupHistoryFolder($historyPath) {
+		if (!is_dir($historyPath)) {//if the specified folder does not exist
+			if (file_exists($historyPath)) {//or it does exist but it is not actually a folder but a file
 				trigger_error("Hicurl history option is set to a file. It should be set to a path to a "
 					. "folder which may or may not exist.", E_USER_ERROR);
 			}
 			mkdir($historyPath, 0777, true);
 		}
-		return new SplFileObject($historyPath."/data.json",'c+');
+		$historyDataFileObject=new SplFileObject($historyPath."/data.json",'c+');
+		$historyDataFileObject->flock(LOCK_EX);
+		if ($historyDataFileObject->fstat()['size']==0) {
+			$historyDataFileObject->fwrite('{"pages":[]}');
+		}
+		$historyDataFileObject->flock(LOCK_UN);
 	}
 	/**
 	 * Writes history to a history-directory. Each page-content gets its own file, and there's also a json-file of the
@@ -151,17 +156,19 @@ class Hicurl {
 	 * @param array $settings
 	 * @param array $historyOptions*/
 	private static function writeHistory($historyDataFileObject,$pageContents,$pageObject,$settings,$historyOptions) {
+		
 		$historyDirectory=$settings['history'];
-		$historyDataFileObject->rewind();
-		$historyDataFileObject->flock(LOCK_EX);
-		$historyData=json_decode($historyDataFileObject->fread($historyDataFileObject->fstat()['size']),true);
+		//$historyDataFileObject->rewind();
+		
+		$startTime=microtime(true);
+		//$historyData=json_decode($historyDataFileObject->fread($historyDataFileObject->fstat()['size']),true);
 					
 		$numExchanges=count($pageContents);
 		for ($i=0; $i<$numExchanges; ++$i) {
 			if (isset($historyOptions['name'])) {
 				$wantedFileName=preg_replace("([^\w\s\d\-_~,;:\[\]\(\)])", '', $historyOptions['name']);
 			} else {
-				$wantedFileName=count($historyData['pages']);
+				$wantedFileName=time();
 			}
 			if ($numExchanges>1)
 				$wantedFileName.="_$i";
@@ -172,9 +179,14 @@ class Hicurl {
 			file_put_contents("$historyDirectory/$fileName", $pageContents[$i]);
 			$pageObject['exchanges'][$i]['content']=$fileName;
 		}
-		$historyData['pages'][]=$pageObject;
-		$historyDataFileObject->rewind();
-		$historyDataFileObject->fwrite(json_encode($historyData));
+		//$historyData['pages'][]=$pageObject;
+		//$historyDataFileObject->rewind();
+		//$historyDataFileObject->fwrite(json_encode($historyData));
+		
+		echo PHP_EOL."Time taken for writeHistory:".(microtime(true)-$startTime);
+		$historyDataFileObject->flock(LOCK_EX);
+		$historyDataFileObject->fseek(-2, SEEK_END);
+		$historyDataFileObject->fwrite(json_encode($pageObject));
 		$historyDataFileObject->flock(LOCK_UN);
 	}
 	
@@ -249,7 +261,7 @@ class Hicurl {
 	public static function loadSingleStatic($url,$formdata=null,$settings=[],$history=[]) {
 		$historyFileObject=null;
 		if (isset($settings['history']))
-				$historyFileObject=Hicurl::setHistoryFolder($settings['history']);
+				$historyFileObject=Hicurl::setupHistoryFolder($settings['history']);
 		return Hicurl::loadSingleReal(curl_init(),$historyFileObject,$url,$formdata,
 				($settings?$settings:[])+Hicurl::$defaultSettings,$history);
 	}
