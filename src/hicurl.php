@@ -182,7 +182,7 @@ class Hicurl {
 			//lock of $historyDataFileObject
 			file_put_contents("$historyDirectory/pages/$fileName", $pageContents[$i]);
 			$pageObject['exchanges'][$i]['content']=$fileName;
-		}		
+		}
 		$historyDataFileObject->fseek(-2, SEEK_END);
 		$size=$historyDataFileObject->fstat()['size'];
 		$historyDataFileObject->fwrite(($size>12?',':'').json_encode($pageObject).']}');
@@ -399,24 +399,30 @@ class Hicurl {
 		$historyFolderPath=realpath($historyFolderPath);
 		$historyPagesFolderPath=$historyFolderPath.DIRECTORY_SEPARATOR.'pages';
 		$historyPagesPath=$historyPagesFolderPath.DIRECTORY_SEPARATOR.'*';
-		$historyDataFile=$historyFolderPath.DIRECTORY_SEPARATOR.'data.json';
+		$historyDataFilePath=$historyFolderPath.DIRECTORY_SEPARATOR.'data.json';
 		$historyPagesArchive=$historyFolderPath.DIRECTORY_SEPARATOR.'pages.7z';
 		if(!function_exists('exec')) {
 			trigger_error("Access to system shell is currently mandatory.", E_USER_ERROR);
 		}
-		//foreach (["data.json","pages"] as $compileFile) {
-		//$compileFiles[]=realpath($historyFolderPath.DIRECTORY_SEPARATOR.$compileFile);
-		//}
 		
-		$command='cd "'.__DIR__.'"'//cd to same folder as this very file
-				." && 7za a \"$historyPagesArchive\" \"$historyPagesPath\""
-				." && 7za a \"$historyDataFile.gz\" \"$historyDataFile\""
-				." && rmdir /s/q \"$historyPagesFolderPath\" && del /f/s/q $historyDataFile";
+		if (isset($customData)) {
+			$historyDayaFileObject=new SplFileObject($historyDataFilePath,'r+');
+			$historyDayaFileObject->fseek(-1, SEEK_END);//seek to pos before closing "}"
+			$historyDayaFileObject->fwrite(',"customData":'.json_encode($customData).'}');
+			$historyDayaFileObject=null;
+		}
+		
+		$command='cd "'.__DIR__.'"'//cd to same folder as this very file so that 7za.exe may be used
+				." && 7za a \"$historyPagesArchive\" \"$historyPagesPath\""//compress the files in the pages-folder
+				." && 7za a \"$historyDataFilePath.gz\" \"$historyDataFilePath\""//..and data.json
+				
+				//remove source files this method takes about 70% as long as php glob()+unlink()
+				." && rmdir /s/q \"$historyPagesFolderPath\" && del /f/s/q $historyDataFilePath";
 		exec($command,$output,$return_var);
 		$timeTaken=microtime(true)-$startTime;
 		if (!$return_var) {
 			$pagesArchiveInfo=Hicurl::getArchiveData($historyPagesArchive);
-			$dataArchiveInfo=Hicurl::getArchiveData("$historyDataFile.gz");
+			$dataArchiveInfo=Hicurl::getArchiveData("$historyDataFilePath.gz");
 			
 			$passedHours = floor($timeTaken / 3600);
 			$passedMins = floor(($timeTaken - ($passedHours*3600)) / 60);
