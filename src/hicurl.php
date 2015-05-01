@@ -174,13 +174,13 @@ class Hicurl {
 			if ($numExchanges>1)
 				$wantedFileName.="_$i";
 			$fileName=$wantedFileName;
-			for ($j=0; file_exists($historyDirectory.$fileName); ++$j) {       
+			for ($j=0; file_exists("$historyDirectory/pages/$fileName"); ++$j) {       
 				$fileName=$wantedFileName."($j)";
 			}
 			
 			//locking not needed since this can only be run by one thread at a time, which is the one that holds the
 			//lock of $historyDataFileObject
-			file_put_contents("$historyDirectory/$fileName", $pageContents[$i]);
+			file_put_contents("$historyDirectory/pages/$fileName", $pageContents[$i]);
 			$pageObject['exchanges'][$i]['content']=$fileName;
 		}		
 		$historyDataFileObject->fseek(-2, SEEK_END);
