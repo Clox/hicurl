@@ -1,8 +1,9 @@
 function Hicurl(domElement,dataUrl) {
+	this._dataUrl=dataUrl;
 	this._domElement=domElement;
 	domElement.className+=" hicurl easyui-layout";
 	$.when(
-		$.getJSON(dataUrl),
+		$.getJSON(dataUrl+"?getJsonList=true"),
 		
 		//load jstree for viewing json with
 		$.getScript("https://cdnjs.cloudflare.com/ajax/libs/jstree/3.1.0/jstree.min.js")
@@ -21,9 +22,10 @@ function Hicurl(domElement,dataUrl) {
 	var contentPanel=component(centerLayout,"region:'south',title:'',split:true",
 		{height:"50%",overflow:"hidden"},"contentPanel");
 	this._contentTabs=component(contentPanel,"fit:true",null,"easyui-tabs content");
-	component(this._contentTabs,"selected: false").title="Content";
+	
 	$.parser.parse();
-	$(this._contentTabs).tabs('disableTab', 0);
+
+	$(this._contentTabs).tabs({onSelect:$.proxy(Hicurl._contentTabSelected,this)});
 		
 	function component(parent,options,style,className,title) {
 		var component=document.createElement("div");
@@ -80,28 +82,50 @@ Hicurl.prototype._pageClick=function(node) {
 	
 	$(this._jsonPanel).jstree("deselect_all");
 	//remove all content-tabs(except from the very left one with the title of "Content", which actuallt is a tab too
-	while ($(this._contentTabs).tabs('getTab',1))
-		$(this._contentTabs).tabs('close',1);
+	while ($(this._contentTabs).tabs('getTab',0))
+		$(this._contentTabs).tabs('close',0);
 	
 	if (node.index==null) {
-		$(this._jsonPanel).jstree("select_node","hicurl_jstree_page_root"); 
+		$(this._jsonPanel).jstree("select_node","hicurl_jstree_page_root");
+		this._selectedPage=null;
 	} else {
 		//tabs don't work in textareas with nowrap-setting(whitespace in general is limited)
 		var opts={indent_char:" "};//...so using non-breaking-space instead
-		$(this._jsonPanel).jstree("select_node","hicurl_jstree_page_"+node.index); 
-		var exchanges=this._data.pages[node.index].exchanges;
+		$(this._jsonPanel).jstree("select_node","hicurl_jstree_page_"+node.index);
+		this._selectedPage=this._data.pages[node.index];
+		var exchanges=this._selectedPage.exchanges;
+		
 		for (var i=0; i<exchanges.length; i++) {
-			var textArea=document.createElement("textArea");
+			/*var textArea=document.createElement("textArea");
 			textArea.value=exchanges[i].content,opts;//textArea.value=html_beautify(exchanges[i].content,opts);
-			textArea.readOnly = true;
+			textArea.readOnly = true;*/
+			
 			$(this._contentTabs).tabs('add',{
 				title: !exchanges[i].error?"Success":exchanges[i].error.split("\n")[0],
-				selected: true,
-				content:textArea,
+				
+				onSelect: $.proxy(Hicurl._contentTabSelected,this)
+				//content:textArea,
 			});
 		}
 	}
 };
+Hicurl._contentTabSelected=function(tabTitle,tabIndex) {
+	console.log(tabIndex);
+	console.log(this._selectedPage);
+	$.ajax(this._dataUrl+"?getPageContent="+this._selectedPage.exchanges[tabIndex].content)
+			.done($.proxy(Hicurl._pageContentDownloaded,this));
+}
+Hicurl._pageContentDownloaded=function(content) {
+	var textArea=document.createElement("textArea");
+	textArea.value=content;//textArea.value=html_beautify(exchanges[i].content,opts);
+	textArea.readOnly = true;
+	$(this._contentTabs).tabs('update', {
+		tab:$(this._contentTabs).tabs('getSelected'),
+		options: {
+			content:textArea
+		}
+	});
+}
 
 
 Hicurl._jstreeFormat=function(value,key) {

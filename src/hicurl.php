@@ -511,12 +511,28 @@ class Hicurl {
 	
 	/**
 	 * Writes history to the output-buffer.
-	 * @param string $historyPath Path of the compiled history-file.
-	 * @param int|bool $cache Controls browser-caching of the history-file. Possible values are false for no caching,
-	 * true(default) for caching of 365 days or an integer specifying cache max-age in seconds.*/
-	public static function serveHistory($historyPath,$cache=true) {
-		ini_set('zlib.output_compression','Off');
-		$HTTP_ACCEPT_ENCODING = $_SERVER["HTTP_ACCEPT_ENCODING"]; 
+	 * @param string $historyFolderPath Path-string of the history-folder to be served.*/
+	public static function serveHistory($historyFolderPath) {
+		
+		
+		if (isset($_GET['getJsonList'])) {
+			$fileToServe="data.json";
+		} else {
+			$fileToServe='pages'.DIRECTORY_SEPARATOR.$_GET['getPageContent'];
+		}
+		
+		
+		$historyFolderPath=realpath($historyFolderPath);
+		if (file_exists($historyFolderPath.'/data.7z')) {//is history-folder compiled?
+			$cache=true;
+			$command='cd "'.__DIR__.'"'//cd to same folder as this very file
+			.' && 7za e "'.$historyFolderPath.DIRECTORY_SEPARATOR.'data.7z" "'.$fileToServe.'" -so 2>7za_e_log.txt';
+			//echo $response=exec($command, $output, $return_var);
+			$lastLine=system($command);
+			//echo $response=exec($command, $output, $return_var);
+		} else {//serve uncompiled history
+			$cache=isset($_GET['getPageContent']);
+		}
 		
 		if ($cache) {
 			if ($cache===true)
@@ -527,21 +543,5 @@ class Hicurl {
 			header("Pragma: no-cache"); //HTTP 1.0
 			header("Expires: Sat, 26 Jul 1997 05:00:00 GMT"); // Date in the past
 		}
-			
-		
-		if(headers_sent()) 
-			$encoding = false; 
-		else if(strpos($HTTP_ACCEPT_ENCODING, 'x-gzip') !== false)
-			$encoding = 'x-gzip'; 
-		else if(strpos($HTTP_ACCEPT_ENCODING,'gzip') !== false)
-			$encoding = 'gzip'; 
-		else
-			$encoding = false;
-		if ($encoding) {
-			header('Content-Encoding: '.$encoding);
-			header('Content-Type: text/plain');
-			readfile($historyPath);
-		} else
-			echo gzdecode (file_get_contents($historyPath));
 	}
 }
