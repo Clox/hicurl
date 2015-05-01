@@ -388,37 +388,75 @@ class Hicurl {
 	}
 	
 	/**
-	 * Compiles and compresses the specified history-folder. This is to be done when writing to the history-file is
-	 * complete, as it puts the history in a closed state.
+	 * Compiles and compresses the specified history-folder.
+	 * This is to be done when writing to the history-file is complete, as it puts the history in a closed state.
 	 * @param string $historyFolderPath Path-string of the history-folder to be compiled.
 	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
 	 *		the history-json-object, which resides i the history-archive by the name "data.json".
 	 * @return bool Returns TRUE on success or FALSE on failure.*/
 	public static function compileHistoryStatic($historyFolderPath,$customData=null) {
-		$outputFile=realpath($historyFolderPath).DIRECTORY_SEPARATOR.'data.7z';
+		$startTime=microtime(true);
+		$historyFolderPath=realpath($historyFolderPath);
+		$historyPagesFolderPath=$historyFolderPath.DIRECTORY_SEPARATOR.'pages';
+		$historyPagesPath=$historyPagesFolderPath.DIRECTORY_SEPARATOR.'*';
+		$historyDataFile=$historyFolderPath.DIRECTORY_SEPARATOR.'data.json';
+		$historyPagesArchive=$historyFolderPath.DIRECTORY_SEPARATOR.'pages.7z';
 		if(!function_exists('exec')) {
 			trigger_error("Access to system shell is currently mandatory.", E_USER_ERROR);
 		}
-		foreach (["data.json","pages"] as $compileFile) {
-			$compileFiles[]=realpath($historyFolderPath.DIRECTORY_SEPARATOR.$compileFile);
-		}
+		//foreach (["data.json","pages"] as $compileFile) {
+		//$compileFiles[]=realpath($historyFolderPath.DIRECTORY_SEPARATOR.$compileFile);
+		//}
+		
 		$command='cd "'.__DIR__.'"'//cd to same folder as this very file
-				." && 7za a \"$outputFile\" "
-				.'"'.implode('" "',$compileFiles).'"';
+				." && 7za a \"$historyPagesArchive\" \"$historyPagesPath\""
+				." && 7za a \"$historyDataFile.gz\" \"$historyDataFile\""
+				;//." && rmdir /s/q \"$historyPagesFolderPath\" del /f/s/q ";
 		exec($command,$output,$return_var);
+		$timeTaken=microtime(true)-$startTime;
 		if (!$return_var) {
-
-			foreach ($compileFiles as $toBeDeleted) {
-				if(is_dir($toBeDeleted)) {
-					$commands[]="rmdir /s/q \"$toBeDeleted\"";
-				} else {
-					$commands[]="del /f/s/q \"$toBeDeleted\"";
-				}
-			}
-			$command=implode(' && ',$commands);
-			exec($command,$output,$return_var);
-			return !$return_var;
+			$pagesArchiveInfo=Hicurl::getArchiveData($historyPagesArchive);
+			$dataArchiveInfo=Hicurl::getArchiveData("$historyDataFile.gz");
+			
+			$passedHours = floor($timeTaken / 3600);
+			$passedMins = floor(($timeTaken - ($passedHours*3600)) / 60);
+			$passedSecs = floor($timeTaken % 60);
+			
+			$oldSize=$pagesArchiveInfo['uncompressedSize']+$dataArchiveInfo['uncompressedSize'];
+			$newSize=$pagesArchiveInfo['compressedSize']+$dataArchiveInfo['compressedSize'];
+			file_put_contents("$historyFolderPath/info.txt", 
+				"Compiled history at ".date("D M d, Y G:i")."\r\n"
+				.($pagesArchiveInfo['numFiles']+1)." files at a total size of "
+				.Hicurl::formatBytes($oldSize)
+				." compressed down to ".
+					Hicurl::formatBytes($newSize)." (".round($newSize/$oldSize*100,2)."% of original)\r\n"
+				."Time taken: $passedHours hours, $passedMins minutes and $passedSecs seconds"
+			);
 		}
+		return !$return_var;
+	}
+	
+	private static function getArchiveData($archivePath) {
+		exec("7za l \"$archivePath\"",$output);
+		$archiveData=$output[count($output)-6];
+		return [
+			'uncompressedSize'=>(int)substr($archiveData,26,12),
+			'compressedSize'=>(int)substr($archiveData,39,12),
+			'numFiles'=>(int)substr($archiveData,53,24)
+		];
+	}
+	private static function formatBytes($bytes, $precision = 2) { 
+		$units = array('B', 'KB', 'MB', 'GB', 'TB'); 
+
+		$bytes = max($bytes, 0); 
+		$pow = floor(($bytes ? log($bytes) : 0) / log(1024)); 
+		$pow = min($pow, count($units) - 1); 
+
+		// Uncomment one of the following alternatives
+		// $bytes /= pow(1024, $pow);
+		 $bytes /= (1 << (10 * $pow)); 
+
+		return round($bytes, $precision) . ' ' . $units[$pow]; 
 	}
 	
 	/**
