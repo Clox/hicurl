@@ -548,28 +548,26 @@ class Hicurl {
 	}
 	
 	/**
-	 * Writes history to the output-buffer.
+	 * Writes history to the output-stream.
 	 * @param string $historyFolderPath Path-string of the history-folder to be served.*/
 	public static function serveHistory($historyFolderPath) {
-		
-		
+		$compiled=file_exists("$historyFolderPath/data.json.gz");
+		$cache=true;
 		if (isset($_GET['getJsonList'])) {
-			$fileToServe="data.json";
+			if ($compiled) {
+				Hicurl::servePrecompressedGZ("$historyFolderPath/data.json.gz");
+			} else {
+				readfile("$historyFolderPath/data.json");
+				$cache=false;
+			}
 		} else {
-			$fileToServe='pages'.DIRECTORY_SEPARATOR.$_GET['getPageContent'];
-		}
-		
-		
-		$historyFolderPath=realpath($historyFolderPath);
-		if (file_exists($historyFolderPath.'/data.7z')) {//is history-folder compiled?
-			$cache=true;
-			$command='cd "'.__DIR__.'"'//cd to same folder as this very file
-			.' && 7za e "'.$historyFolderPath.DIRECTORY_SEPARATOR.'data.7z" "'.$fileToServe.'" -so 2>7za_e_log.txt';
-			//echo $response=exec($command, $output, $return_var);
-			$lastLine=system($command);
-			//echo $response=exec($command, $output, $return_var);
-		} else {//serve uncompiled history
-			$cache=isset($_GET['getPageContent']);
+			$historyFolderPath=realpath($historyFolderPath);
+			if ($compiled) {
+				$command='cd "'.__DIR__.'"'//cd to same folder as this very file
+				.' && 7za e "'.$historyFolderPath.DIRECTORY_SEPARATOR
+						."pages.7z\" \"$_GET[getPageContent]\" -so 2>7za_e_log.txt";
+				system($command);
+			}
 		}
 		
 		if ($cache) {
@@ -581,5 +579,23 @@ class Hicurl {
 			header("Pragma: no-cache"); //HTTP 1.0
 			header("Expires: Sat, 26 Jul 1997 05:00:00 GMT"); // Date in the past
 		}
+	}
+	private static function servePrecompressedGZ($filePath) {
+		ini_set('zlib.output_compression','Off');
+		$HTTP_ACCEPT_ENCODING = $_SERVER["HTTP_ACCEPT_ENCODING"]; 
+		if(headers_sent()) 
+			$encoding = false; 
+		else if(strpos($HTTP_ACCEPT_ENCODING, 'x-gzip') !== false)
+			$encoding = 'x-gzip'; 
+		else if(strpos($HTTP_ACCEPT_ENCODING,'gzip') !== false)
+			$encoding = 'gzip'; 
+		else
+			$encoding = false;
+		if ($encoding) {
+			header('Content-Encoding: '.$encoding);
+			header('Content-Type: text/plain');
+			readfile($filePath);
+		} else
+			echo gzdecode (file_get_contents($filePath));
 	}
 }
