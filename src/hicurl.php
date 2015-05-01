@@ -420,7 +420,7 @@ class Hicurl {
 				." && rmdir /s/q \"$historyPagesFolderPath\" && del /f/s/q $historyDataFilePath";
 		exec($command,$output,$return_var);
 		$timeTaken=microtime(true)-$startTime;
-		if (!$return_var) {
+		if (!$return_var) {//if previous command was successful
 			$pagesArchiveInfo=Hicurl::getArchiveData($historyPagesArchive);
 			$dataArchiveInfo=Hicurl::getArchiveData("$historyDataFilePath.gz");
 			
@@ -463,51 +463,6 @@ class Hicurl {
 		 $bytes /= (1 << (10 * $pow)); 
 
 		return round($bytes, $precision) . ' ' . $units[$pow]; 
-	}
-	
-	/**
-	 * Compress input-file with gzip encoding
-	 * @param string $historyFilePath The path of the input-file
-	 * @param string|null $outputFile Path for the output. If omitted then the same as input is used.*/
-	private static function compressHistoryFile($inputFile,$outputFile) {
-		if (!$outputFile)
-			$outputFile=$inputFile;
-		//We want to use system gzip via exec(), and only if that fails fall back on php gzencode()
-		//is exec() available?
-		//this should also check whether exec is in ini_get('disable_functions') and whether safemode is on
-		if(function_exists('exec')) {
-			
-			//if input-file has extension gz already, even if it isn't compressed then gzip refuses to compress it
-			if (pathinfo($inputFile, PATHINFO_EXTENSION)=='gz') {
-				rename($inputFile, $inputFile=substr($inputFile,0,-3));
-			}
-			
-			//if system is windows then there is no native gzip-command, which is why we cd into src-folder where
-			//gzip.exe should be located, which will be used in that case. separate commands with ;
-			$command='cd "'.__DIR__.'" && '//cd to same folder as this very file
-					.'gzip --force --quiet ';//--force is for forcing overwrite if output-file already exist
-			//if (!$writeToFile) $command.=' --stdout';
-			$command.='"'.realpath($inputFile).'"';
-			$response=exec($command, $output, $return_var);
-			
-			if ($return_var!==1) {//success!
-				if ($outputFile!=$inputFile.'.gz') {
-					//the reason why rename is used rather than passing an output-file to the gzip-call with > is that
-					//it doesn't work if input and output are the same, but it works with rename.
-					rename ($inputFile.'.gz', $outputFile);
-				}
-				return true;
-			}
-		}
-		//Hopefully the block above ended this function with a return statement, but otherwise fall back on below code
-		
-		//Set memory_limit to a high number or there might be a problem holding all page-contents in memory which is
-		//needed in order to gzip efficiently.
-		$memoryLimit=ini_get('memory_limit');//save old to be able to revert
-		ini_set('memory_limit', -1);
-		file_put_contents($outputFile,gzencode(file_get_contents($inputFile)));
-		ini_set('memory_limit', $memoryLimit);//revert back to old
-		return true;
 	}
 	
 	/**
