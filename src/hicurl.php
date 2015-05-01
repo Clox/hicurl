@@ -109,11 +109,12 @@ class Hicurl {
 			}
 			mkdir($historyPath, 0777, true);
 		}
-		$historyDataFileObject=new SplFileObject($historyPath."/data.json",'c+');
+		$historyDataFileObject=new SplFileObject("$historyPath/data.json",'c+');
 		$historyDataFileObject->flock(LOCK_EX);
 		if ($historyDataFileObject->fstat()['size']==0) {
 			$historyDataFileObject->fwrite('{"pages":[]}');
 		}
+		mkdir("$historyPath/pages");
 		$historyDataFileObject->flock(LOCK_UN);
 		return $historyDataFileObject;
 	}
@@ -161,10 +162,9 @@ class Hicurl {
 		$historyDirectory=$settings['history'];
 		//$historyDataFileObject->rewind();
 		
-		$startTime=microtime(true);
 		//$historyData=json_decode($historyDataFileObject->fread($historyDataFileObject->fstat()['size']),true);
-					
 		$numExchanges=count($pageContents);
+		$historyDataFileObject->flock(LOCK_EX);
 		for ($i=0; $i<$numExchanges; ++$i) {
 			if (isset($historyOptions['name'])) {
 				$wantedFileName=preg_replace("([^\w\s\d\-_~,;:\[\]\(\)])", '', $historyOptions['name']);
@@ -177,15 +177,12 @@ class Hicurl {
 			for ($j=0; file_exists($historyDirectory.$fileName); ++$j) {       
 				$fileName=$wantedFileName."($j)";
 			}
+			
+			//locking not needed since this can only be run by one thread at a time, which is the one that holds the
+			//lock of $historyDataFileObject
 			file_put_contents("$historyDirectory/$fileName", $pageContents[$i]);
 			$pageObject['exchanges'][$i]['content']=$fileName;
-		}
-		//$historyData['pages'][]=$pageObject;
-		//$historyDataFileObject->rewind();
-		//$historyDataFileObject->fwrite(json_encode($historyData));
-		
-		echo PHP_EOL."Time taken for writeHistory:".(microtime(true)-$startTime);
-		$historyDataFileObject->flock(LOCK_EX);
+		}		
 		$historyDataFileObject->fseek(-2, SEEK_END);
 		$size=$historyDataFileObject->fstat()['size'];
 		$historyDataFileObject->fwrite(($size>12?',':'').json_encode($pageObject).']}');
@@ -193,19 +190,8 @@ class Hicurl {
 	}
 	
 	/**
-	 * Takes the file objec for a history file and seeks to the beginning of the tempData-section.
-	 * @param SplFileObject $historyFileObject Uncompiled history-file
-	 * @return int The bytesize of the tempData-section*/
-	private static function seekHistoryFileTempData($historyFileObject) {
-		$historyFileObject->fseek(-4, SEEK_END);
-		$tempDataSize=unpack('N',$historyFileObject->fread(4))[1];
-		$historyFileObject->fseek(-4-$tempDataSize, SEEK_END);
-		return $tempDataSize;
-	}
-	
-	/**
-	 * This is the heart of Hicurl. It loads a requested url, using specified settings and returns the
-	 * server-response along with some data and optionally writes all data to a history-file.
+	 * Loads a requested url, using specified settings and returns the server-response along with some data and
+	 * optionally saves data to a "history-folder".
 	 * This method has a static counterpart of the name loadSingleStatic which works just the same.
 	 * @param string $url A URL-string to load
 	 * @param array|null $formdata If this is null then the request is sent as GET. Otherwise it is sent as POST using
@@ -256,8 +242,8 @@ class Hicurl {
 	}
 	
 	/**
-	 * This is the heart of Hicurl. It loads a requested url, using specified settings and returns the
-	 * server-response along with some data and optionally writes all data to a history-file.
+	 * Loads a requested url, using specified settings and returns the server-response along with some data and
+	 * optionally saves data to a "history-folder".
 	 * This method has a instance counterpart of the name loadSingle which works just the same.
 	 * @see loadSingle()*/
 	public static function loadSingleStatic($url,$formdata=null,$settings=[],$history=[]) {
@@ -411,44 +397,35 @@ class Hicurl {
 	}
 	
 	/**
-	 * Compiles the history-file. This is to be done when the writing to the history-file is complete.
-	 * This essentialy puts the file in a closed state, gzipping it while also optionally adding extra data.
-	 * @param string|SplFileObject $historyInput Either a string which is a path to a file that is to be compiled,
-	 *		or a SplFileObject pointing to that file. This file will be deleted by this function, leaving you only
-	 *		with its compiled state.
-	 * @param string|null $historyOutput A filepath-string to the file to be created. This may be omitted in which case
-	 *		the output-file will be generated in the same directory as the input-file, with the same name but with
-	 *		".gz" added at the end.
+	 * Compiles and compresses the specified history-folder. This is to be done when writing to the history-file is
+	 * complete, as it puts the history in a closed state.
+	 * @param string $historyFolderPath Path-string of the history-folder to be compiled.
 	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
-	 *		the final, compiled json-object with the same name("customData")
-	 * @param bool $keepInputFile If this is set to true then the uncompiled input-file will not be deleted. An example
-	 *		of a useful case for this would be if daily history-files are generated, and one would like to view the
-	 *		history so far of today. For this to work $historyOutput needs to be set.
-	 * @return bool Returns true for success*/
-	public static function compileHistoryStatic($historyInput,$historyOutput=null,$customData=null
-			,$keepInputFile=false) {
-		//At this point the history should be formatted as:
-		//{"pages":[page1{},page2{}+tempData+tempDataSize
-		//i.e.
-		//{"pages":[{"exchanges":[{"content":"foobar","headers":{"http_code":200}}]}{"numPages":1,"idIndices":[]}29
-		//(the outer bracket&brace aren't closed)
-		
-		if ($keepInputFile) {
-			//can't use tmpfile() or SplTempFileObject because we can't get a path from those
-			//to feed to exec in compressHistoryFile() so tempnam() is used instead.
-			$tempFile=tempnam(dirname($historyInput) , 'hicurlHistory');
-			copy ($historyInput,$tempFile);
-			$historyInput=$tempFile;
+	 *		the history-json-object, which resides i the history-archive by the name "data.json".*/
+	public static function compileHistoryStatic($historyFolderPath,$customData=null) {
+		$outputFile=realpath($historyFolderPath).DIRECTORY_SEPARATOR.'data.7z';
+		if(!function_exists('exec')) {
+			trigger_error("Access to system shell is currently mandatory.", E_USER_ERROR);
 		}
-		$historyInput=new SplFileObject($historyInput,'r+');
-		Hicurl::seekHistoryFileTempData($historyInput);
-		$historyInput->fwrite('],"customData":'.json_encode($customData).'}');
-		$historyInput->ftruncate($historyInput->ftell());
-		
-		$historyInputPath=$historyInput->getRealPath();
-		$historyInput=null;//remove the reference to the file so that gzip can delete it as supposed to
-		
-		Hicurl::compressHistoryFile($historyInputPath,$historyOutput);
+		foreach (["data.json","pages"] as $compileFile) {
+			$compileFiles[]=realpath($historyFolderPath.DIRECTORY_SEPARATOR.$compileFile);
+		}
+		$command='cd "'.__DIR__.'"'//cd to same folder as this very file
+				." && 7za a \"$outputFile\" "
+				.'"'.implode('" "',$compileFiles).'"';
+		exec($command,$output,$return_var);
+		if (!$return_var) {
+
+			foreach ($compileFiles as $toBeDeleted) {
+				if(is_dir($toBeDeleted)) {
+					$commands[]="rmdir /s/q \"$toBeDeleted\"";
+				} else {
+					$commands[]="del /f/s/q \"$toBeDeleted\"";
+				}
+			}
+			$command=implode(' && ',$commands);
+			exec($command,$output,$return_var);
+		}
 	}
 	
 	/**
