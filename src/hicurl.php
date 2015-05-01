@@ -411,7 +411,7 @@ class Hicurl {
 		$command='cd "'.__DIR__.'"'//cd to same folder as this very file
 				." && 7za a \"$historyPagesArchive\" \"$historyPagesPath\""
 				." && 7za a \"$historyDataFile.gz\" \"$historyDataFile\""
-				;//." && rmdir /s/q \"$historyPagesFolderPath\" del /f/s/q ";
+				." && rmdir /s/q \"$historyPagesFolderPath\" && del /f/s/q $historyDataFile";
 		exec($command,$output,$return_var);
 		$timeTaken=microtime(true)-$startTime;
 		if (!$return_var) {
