@@ -376,24 +376,15 @@ class Hicurl {
 	}
 	
 	/**
-	 * Compiles the history-file. This is to be done when the writing to the history-file is complete.
-	 * This essentialy puts the file in a closed state, gzipping it while also optionally adding extra data.
-	 * @param string|null $historyOutput A filepath-string to the file to be created. This may be omitted in which case
-	 *		the output-file will be the same as the input.
+	 * Compiles and compresses the specified history-folder. This is to be done when writing to the history-file is
+	 * complete, as it puts the history in a closed state.
+	 * @param string $historyFolderPath Path-string of the history-folder to be compiled.
 	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
-	 *		the final, compiled json-object with the same name("customData")
-	 * @param bool $keepInputFile If this is set to true then the uncompiled input-file will not be deleted. An example
-	 *		of a useful case for this would be if daily history-files are generated, and one would like to view the
-	 *		history so far of today. For this to work $historyOutput needs to be set.
-	 * @return bool Returns true for success*/
-	public function compileHistory($historyOutput=null,$customData=null,$keepInputFile=false) {
-		//$this->historyFileObject needs to be unset so that gzip can remove the input file as its supposed to(unless
-		//$keepInputFile is set to true), and we can't save it to a local variable and then remove it from instance
-		//and call compile with local, since this local variable in this function will still be holdig it then which
-		//would prevent the file from getting removed.
-		$historyFilePath=$this->historyFileObject->getPathname();
-		$this->historyFileObject=null;
-		Hicurl::compileHistoryStatic($historyFilePath, $historyOutput,$customData,$keepInputFile);
+	 *		the history-json-object, which resides i the history-archive by the name "data.json".
+	 * @return bool Returns TRUE on success or FALSE on failure.*/
+	public function compileHistory($customData=null) {
+		$this->historyFileObject=null;//so that it can be deleted
+		return Hicurl::compileHistoryStatic($this->settingsData['history'],$customData);
 	}
 	
 	/**
@@ -401,7 +392,8 @@ class Hicurl {
 	 * complete, as it puts the history in a closed state.
 	 * @param string $historyFolderPath Path-string of the history-folder to be compiled.
 	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
-	 *		the history-json-object, which resides i the history-archive by the name "data.json".*/
+	 *		the history-json-object, which resides i the history-archive by the name "data.json".
+	 * @return bool Returns TRUE on success or FALSE on failure.*/
 	public static function compileHistoryStatic($historyFolderPath,$customData=null) {
 		$outputFile=realpath($historyFolderPath).DIRECTORY_SEPARATOR.'data.7z';
 		if(!function_exists('exec')) {
@@ -425,6 +417,7 @@ class Hicurl {
 			}
 			$command=implode(' && ',$commands);
 			exec($command,$output,$return_var);
+			return !$return_var;
 		}
 	}
 	
