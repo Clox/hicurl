@@ -23,6 +23,7 @@ class Hicurl {
 	/**
 	 * @var array Default settings used when creating an instance of Hicurl or calling its load-methods statically.*/
 	static public $defaultSettings=[
+		'acceptStatusCodes'=>[200,201,202,203,204,205,206,207,208,226,300,301,302,303,304,305,306,307,308],
 		'maxFruitlessRetries'=>40,
 		'fruitlessPassDelay'=>10,
 		'maxRequestsPerPass'=>100,
@@ -52,6 +53,8 @@ class Hicurl {
 	 * returns the current settings.
 	 * Otherwise an array with a combination of the following settings should be passed:
 	 *	<ul>
+	 *		<li>'acceptStatusCodes' int[] Defaults to [200]. An array of HTTP status codes to accept. Any request with
+	 *			a status code not in this list will be considered failed.</li>
 	 *		<li>'maxFruitlessRetries' int Defaults to 40. Max amount of retries before a load-function gives up. For
 	 *			loadSingle this is simply the number of retries for that url. For loadMulti it is the max number of
 	 *			consecutive retries for the same group of requests.</li>
@@ -345,8 +348,8 @@ class Hicurl {
 		if (strpos($headers['content_type'],'utf-8')===false) {
 			$content=utf8_encode($content);
 		}
-		if ($headers['http_code']==404) {
-			return 'HTTP code 404';
+		if (!in_array($settings['acceptStatusCodes'], $headers['http_code'])) {
+			return "HTTP code $headers[http_code]";
 		}
 		if ($settings['retryOnNull']&&$content===null) {
 			return 'Null content';
@@ -449,7 +452,7 @@ class Hicurl {
 			$oldSize=$pagesArchiveInfo['uncompressedSize']+$dataArchiveInfo['uncompressedSize'];
 			$newSize=$pagesArchiveInfo['compressedSize']+$dataArchiveInfo['compressedSize'];
 			file_put_contents("$historyFolderPath/info.txt", 
-				"Compiled history at ".date("D M d, Y G:i")."\r\n"
+				"Compiled history at ".date("D M d, Y G:i",$startTime)."\r\n"
 				.($pagesArchiveInfo['numFiles']+1)." files at a total size of "
 				.Hicurl::formatBytes($oldSize)
 				." compressed down to ".
