@@ -3,9 +3,7 @@
 
 
 /**
- * A class that simplifies URL requests. Rather than working with CURL and its settings directly this
- * class maks it easy by using simple syntax for the most common settings.
- * But more importantly this class also allows for easily saving the history of the requests&responses
+ * A class that simplifies URL requests and adds new functionality, like saving history of requests.
  * with their contens/headers.*/
 class Hicurl {
 	
@@ -101,26 +99,42 @@ class Hicurl {
 		}
 		return $this->settingsData;
 	}
+	
+	/**
+	 * Set ups the folder set in settings['history'].
+	 * Creates the folder if it doesn't already exist and creates "data.json" with
+	 * initial strucuture-data which also will be returned.
+	 * @param string $historyPath The path to the history-folder.
+	 * @return \SplFileObject The fileObject for the created "data.json" in the folder*/
 	private static function setupHistoryFolder($historyPath) {
-		if (!is_dir($historyPath)) {//if the specified folder does not exist
-			if (file_exists($historyPath)) {//or it does exist but it is not actually a folder but a file
-				trigger_error("Hicurl history option is set to a file. It should be set to a path to a "
-					. "folder which may or may not exist.", E_USER_ERROR);
-			}
-			mkdir($historyPath, 0777, true);
+		if (file_exists($historyPath)) {
+			trigger_error("Hicurl history option is set to a file. It should be set to a path to a "
+				. "folder which may or may not exist.", E_USER_ERROR);
 		}
-		$historyDataFileObject=new SplFileObject("$historyPath/data.json",'c+');
-		$historyDataFileObject->flock(LOCK_EX);
-		if ($historyDataFileObject->fstat()['size']==0) {
-			$historyDataFileObject->fwrite('{"pages":[]}');
-		}
+
+		//race conditions accounted for.
+		//if a race-condition occurs here where thread A sees that the folder doesn't exist(condition above),
+		//then thread B creates it with next line, and thread A tries to create it as well mkdir will simply
+		//return false, no error will be thrown.
+		mkdir($historyPath, 0777, true);
 		mkdir("$historyPath/pages");
-		$historyDataFileObject->flock(LOCK_UN);
+		$historyDataFileObject=new SplFileObject("$historyPath/data.json",'c+');
+		
+		//lock file with non-block. if it is already locked then skip this block and just return the file-object.
+		//if it's locked then we know base-structure has been written to it anway.
+		if ($historyDataFileObject->flock(LOCK_EX)) {
+			//write base-structure if size is zero
+			if ($historyDataFileObject->fstat()['size']==0) {
+				$historyDataFileObject->fwrite('{"pages":[]}');
+			}
+			$historyDataFileObject->flock(LOCK_UN);
+		}
 		return $historyDataFileObject;
 	}
+	
 	/**
-	 * Writes history to a history-directory. Each page-content gets its own file, and there's also a json-file of the
-	 * name "data.json" that is shared among all requests.
+	 * Writes history to a history-directory set in settings['history'] . Each page-content gets its own file,
+	 * and there's also a json-file of the name "data.json" that is written to which is shared among all requests.
 	 * The structure of "data.json" is as follows:
 	 * <ul>
 	 *		<li>["pages"] array An array where each page (eg. each call to load() gets its own element)
@@ -315,8 +329,8 @@ class Hicurl {
 	}
 	
 	/**
-	 * Takes reference of content-string and utf8-encodes it if necessary and also does the validation which determines
-	 * if the request was deemed successful or not.
+	 * Takes reference of content-string and utf8-encodes it if necessary and also does the validation which
+	 * determines if the request was deemed successful or not, based on $settings.
 	 * @param &string $content Content-string to be parsed and validated. Note that the input-string will be modified.
 	 * @param array $headers Headers-array belongin to the content.
 	 * @param array $settings The current state of settings.
@@ -347,7 +361,7 @@ class Hicurl {
 	}
 	
 	/**
-	 * Method that does xpath-evaluations if set in settings->xpath. Also placed a DOMXPATH-object in the array
+	 * Method that does xpath-evaluations if set in settings->xpath. Also places a DOMXPATH-object in the array
 	 * returned by the load-call.
 	 * @param array $xpath The value of $settings['xpath']
 	 * @param string $pageContent The content of the page
@@ -390,14 +404,18 @@ class Hicurl {
 	/**
 	 * Compiles and compresses the specified history-folder.
 	 * This is to be done when writing to the history-file is complete, as it puts the history in a closed state.
+	 * If this method is called on an already compiled folder then it will simply return false.
 	 * @param string $historyFolderPath Path-string of the history-folder to be compiled.
 	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
 	 *		the history-json-object, which resides i the history-archive by the name "data.json".
 	 * @return bool Returns TRUE on success or FALSE on failure.*/
 	public static function compileHistoryStatic($historyFolderPath,$customData=null) {
 		$startTime=microtime(true);
-		$historyFolderPath=realpath($historyFolderPath);
 		$historyPagesFolderPath=$historyFolderPath.DIRECTORY_SEPARATOR.'pages';
+		if (!is_dir($historyPagesFolderPath)) {//looks like this folder already has been compiled
+			return false;
+		}
+		$historyFolderPath=realpath($historyFolderPath);
 		$historyPagesPath=$historyPagesFolderPath.DIRECTORY_SEPARATOR.'*';
 		$historyDataFilePath=$historyFolderPath.DIRECTORY_SEPARATOR.'data.json';
 		$historyPagesArchive=$historyFolderPath.DIRECTORY_SEPARATOR.'pages.7z';
@@ -416,13 +434,13 @@ class Hicurl {
 				." && 7za a \"$historyPagesArchive\" \"$historyPagesPath\""//compress the files in the pages-folder
 				." && 7za a \"$historyDataFilePath.gz\" \"$historyDataFilePath\""//..and data.json
 				
-				//remove source files this method takes about 70% as long as php glob()+unlink()
+				//remove source files. this method is about 43% faster than php glob()+unlink()
 				." && rmdir /s/q \"$historyPagesFolderPath\" && del /f/s/q $historyDataFilePath";
 		exec($command,$output,$return_var);
 		$timeTaken=microtime(true)-$startTime;
 		if (!$return_var) {//if previous command was successful
-			$pagesArchiveInfo=Hicurl::getArchiveData($historyPagesArchive);
-			$dataArchiveInfo=Hicurl::getArchiveData("$historyDataFilePath.gz");
+			$pagesArchiveInfo=Hicurl::getArchiveInfo($historyPagesArchive);
+			$dataArchiveInfo=Hicurl::getArchiveInfo("$historyDataFilePath.gz");
 			
 			$passedHours = floor($timeTaken / 3600);
 			$passedMins = floor(($timeTaken - ($passedHours*3600)) / 60);
@@ -442,7 +460,58 @@ class Hicurl {
 		return !$return_var;
 	}
 	
-	private static function getArchiveData($archivePath) {
+	/**
+	 * Writes history to the output-stream. The url of a page that calls this method is to be passed to the
+	 * JS Hicurl constructor as the second argument (dataUrl)
+	 * @param string $historyFolderPath Path-string of the history-folder to be served.*/
+	public function serveHistory($historyFolderPath) {
+		Hicurl::serveHistoryStatic($this->settingsData['history']);
+	}
+	
+	/**
+	 * Writes history to the output-stream. The url of a page that calls this method is to be passed to the
+	 * JS Hicurl constructor as the second argument (dataUrl)
+	 * @param string $historyFolderPath Path-string of the history-folder to be served.*/
+	public static function serveHistoryStatic($historyFolderPath) {
+		$compiled=file_exists("$historyFolderPath/data.json.gz");
+		$cache=true;
+		if (isset($_GET['getJsonList'])) {
+			if ($compiled) {
+				Hicurl::servePrecompressedGZ("$historyFolderPath/data.json.gz");
+			} else {
+				readfile("$historyFolderPath/data.json");
+				$cache=false;
+			}
+		} else {
+			$historyFolderPath=realpath($historyFolderPath);
+			if ($compiled) {
+				$command='cd "'.__DIR__.'"'//cd to same folder as this very file
+				.' && 7za e "'.$historyFolderPath.DIRECTORY_SEPARATOR
+						."pages.7z\" \"$_GET[getPageContent]\" -so 2>7za_e_log.txt";
+				system($command);
+			}
+		}
+		
+		if ($cache) {
+			if ($cache===true)
+				$cache=31536000;
+			header("Cache-Control: max-age=$cache, public");
+		} else {
+			header("Cache-Control: no-cache, must-revalidate"); //HTTP 1.1
+			header("Pragma: no-cache"); //HTTP 1.0
+			header("Expires: Sat, 26 Jul 1997 05:00:00 GMT"); // Date in the past
+		}
+	}
+	
+	/**
+	 * Gets info on an archive using 7za
+	 * @param string $archivePath Path the archive
+	 * @return array Returns an array with the following elements: <ul>
+	 *		<li>'uncompressedSize' int Size of the contents of the archives before compression, in bytes</li>
+	 *		<li>'compressedSize' int Size of the contents of the archives after compression, in bytes</li>
+	 *		<li>'numFiles' int Number of files in the archive</li></ul>*/
+	private static function getArchiveInfo($archivePath) {
+		$archivePath=realpath($archivePath);
 		exec("7za l \"$archivePath\"",$output);
 		$archiveData=$output[count($output)-6];
 		return [
@@ -451,17 +520,20 @@ class Hicurl {
 			'numFiles'=>(int)substr($archiveData,53,24)
 		];
 	}
+	
+	
+	
+	/**
+	 * Formats number of bytes into KB/MB/GB/TB
+	 * @param int $bytes Number of bytes
+	 * @param int $precision 0=B,1=KB,2=MB,3=GB,4=TB
+	 * @return string $bytes converted and with KB/MB/GB/TB as suffix.*/
 	private static function formatBytes($bytes, $precision = 2) { 
 		$units = array('B', 'KB', 'MB', 'GB', 'TB'); 
-
 		$bytes = max($bytes, 0); 
 		$pow = floor(($bytes ? log($bytes) : 0) / log(1024)); 
 		$pow = min($pow, count($units) - 1); 
-
-		// Uncomment one of the following alternatives
-		// $bytes /= pow(1024, $pow);
-		 $bytes /= (1 << (10 * $pow)); 
-
+		$bytes /= (1 << (10 * $pow)); 
 		return round($bytes, $precision) . ' ' . $units[$pow]; 
 	}
 	
@@ -509,38 +581,9 @@ class Hicurl {
 	}
 	
 	/**
-	 * Writes history to the output-stream.
-	 * @param string $historyFolderPath Path-string of the history-folder to be served.*/
-	public static function serveHistory($historyFolderPath) {
-		$compiled=file_exists("$historyFolderPath/data.json.gz");
-		$cache=true;
-		if (isset($_GET['getJsonList'])) {
-			if ($compiled) {
-				Hicurl::servePrecompressedGZ("$historyFolderPath/data.json.gz");
-			} else {
-				readfile("$historyFolderPath/data.json");
-				$cache=false;
-			}
-		} else {
-			$historyFolderPath=realpath($historyFolderPath);
-			if ($compiled) {
-				$command='cd "'.__DIR__.'"'//cd to same folder as this very file
-				.' && 7za e "'.$historyFolderPath.DIRECTORY_SEPARATOR
-						."pages.7z\" \"$_GET[getPageContent]\" -so 2>7za_e_log.txt";
-				system($command);
-			}
-		}
-		
-		if ($cache) {
-			if ($cache===true)
-				$cache=31536000;
-			header("Cache-Control: max-age=$cache, public");
-		} else {
-			header("Cache-Control: no-cache, must-revalidate"); //HTTP 1.1
-			header("Pragma: no-cache"); //HTTP 1.0
-			header("Expires: Sat, 26 Jul 1997 05:00:00 GMT"); // Date in the past
-		}
-	}
+	 * Method used for serving a file that already has been compressed in gz format so that the client agent may
+	 * automaticallychandle the decompression.
+	 * @param type $filePath Path to the file*/
 	private static function servePrecompressedGZ($filePath) {
 		ini_set('zlib.output_compression','Off');
 		$HTTP_ACCEPT_ENCODING = $_SERVER["HTTP_ACCEPT_ENCODING"]; 
