@@ -411,11 +411,11 @@ class Hicurl {
 	 * @return bool Returns TRUE on success or FALSE on failure.*/
 	public static function compileHistoryStatic($historyFolderPath,$customData=null) {
 		$startTime=microtime(true);
+		$historyFolderPath=realpath($historyFolderPath);
 		$historyPagesFolderPath=$historyFolderPath.DIRECTORY_SEPARATOR.'pages';
 		if (!is_dir($historyPagesFolderPath)) {//looks like this folder already has been compiled
 			return false;
 		}
-		$historyFolderPath=realpath($historyFolderPath);
 		$historyPagesPath=$historyPagesFolderPath.DIRECTORY_SEPARATOR.'*';
 		$historyDataFilePath=$historyFolderPath.DIRECTORY_SEPARATOR.'data.json';
 		$historyPagesArchive=$historyFolderPath.DIRECTORY_SEPARATOR.'pages.7z';
