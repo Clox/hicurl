@@ -393,26 +393,123 @@ class Hicurl {
 	}
 	
 	/**
-	 * Compiles and compresses the specified history-folder. This is to be done when writing to the history-file is
-	 * complete, as it puts the history in a closed state.
-	 * @param string $historyFolderPath Path-string of the history-folder to be compiled.
-	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
-	 *		the history-json-object, which resides i the history-archive by the name "data.json".
+	 * Compresses the specified history-folder.
+	 * This is to be done when writing to the history-file is complete, as it naturally puts the history in a closed
+	 * state. If this method is called on an already compressed history-folder then it will simply return false.
+	 * It is recommended that this is called in a process/thread separated from the logic that writes to the history,
+	 * since it may take a long time finish.
 	 * @return bool Returns TRUE on success or FALSE on failure.*/
-	public function compileHistory($customData=null) {
+	public function compressHistory() {
 		$this->historyFileObject=null;//so that it can be deleted
-		return Hicurl::compileHistoryStatic($this->settingsData['history'],$customData);
+		return Hicurl::compressHistoryStatic($this->settingsData['history']);
 	}
 	
 	/**
-	 * Compiles and compresses the specified history-folder.
-	 * This is to be done when writing to the history-file is complete, as it puts the history in a closed state.
-	 * If this method is called on an already compiled folder then it will simply return false.
-	 * @param string $historyFolderPath Path-string of the history-folder to be compiled.
-	 * @param mixed $customData Anything that is json-friendly can be passed here. It will be assigned to the root of
-	 *		the history-json-object, which resides i the history-archive by the name "data.json".
+	 * Gets the custom data assigned via setCustomData().
+	 * Note that if getCustomData() is called followed by setCustomData() with data based on what getCustomData()
+	 * returned, there's no guarantee that another process/thread wrote to customData in between. Instead use the
+	 * $mergeStrategy-parameter of setCustomData() to modify data based on what it currently is.
+	 * @return mixed Decoded json-data, or null if there is none*/
+	public function getCustomData() {
+		return Hicurl::getCustomDataStatic($this->settingsData['history']);
+	}
+	
+	/**
+	 * Gets the custom data assigned via setCustomData().
+	 * Note that if getCustomData() is called followed by setCustomData() with data based on what getCustomData()
+	 * returned, there's no guarantee that another process/thread wrote to customData in between. Instead use the
+	 * $mergeStrategy-parameter of setCustomData() to modify data based on what it currently is.
+	 * @param string $historyFolderPath Path-string of the history-folder of the customData to be returned.
+	 * @return mixed Decoded json-data, or null if there is none*/
+	public static function getCustomDataStatic($historyFolderPath) {
+		if (file_exists($customData=$historyFolderPath.'/customData.json.gz')) {
+			return json_decode(gzdecode($historyFolderPath.'/customData.json.gz'),true);
+		}
+		if (file_exists($historyFolderPath.'/customData.json')) {
+			return json_decode($historyFolderPath.'/customData.json',true);
+		}
+	}
+	
+	
+	public function setCustomData() {
+		
+	}
+	
+	/**
+	 * Writes to customData. Arrays/objects from the supplied data that already exist in the current customData with
+	 * the same keys are merged recursively. Different merge-strategies may be set with the $mergeStrategy-parameter.
+	 * <br>Examples:<ol>
+	 *		<li><samp>{"foo":1}</samp> merged with <samp>{"bar":2}</samp> with merge-strategy "=" or "+" gives
+	 *		<samp>{"foo":1,"bar":2}</samp></li>
+	 *		<li><samp>{"foo":1}</samp> merged with <samp>{"foo":2}</samp> with merge-strategy "+" gives
+	 *		<samp>{"foo":3}</samp></li>
+	 *		<li><samp>{"foo":1}</samp> merged with <samp>{"foo":2}</samp> with merge-strategy "=" gives
+	 *		<samp>{"foo":2}</samp></li>
+	 *		<li><samp>{"foo":1}</samp> merged with <samp>{"foo":2}</samp> with merge-strategy "-" gives
+	 *		<samp>{"foo":-1}</samp></li>
+	 *		<li><samp>{"foo":{"bar":3}}</samp> merged with <samp>{"foo":{bar:5},"baz":5}</samp> with merge-strategy "+"
+	 *		gives <samp>{"foo":{"bar":8},"baz":5}</samp></li>
+	 * </ol>
+	 * @param string $historyFolderPath Path-string of the history-folder of the customData to be written to.
+	 * @param string $mergeStrategy Specifies how the supplied data is to be merged with the current data.
+	 * Possible values are:<ul>
+	 *		<li>"+": Elements with matching keys are added together. For numbers they are simply added together with
+	 *			the + operator, for strings the supplied one is appended to the current one.</li>
+	 *		<li>"-": For numbers with matching keys the supplied ones are substracted from the current ones.
+	 *				For strings, the same behavior as "=" is used.</li>
+	 *		<li>"=": For elements with matching keys, those in the current data
+	 *			are replaced by those in the supplied data.</li>
+	 * </ul>
+	 * @param mixed $data The data to be written to customData. It may be anything that is JSON-conversion-friendly.
+	 * @param mixed $data,... unlimited Optional additional datasets. */
+	public static function setCustomDataStatic($historyFolderPath,$mergeStrategy,$data) {
+		$customDataFilePath=$historyFolderPath.'/customData.json';
+		$args=func_get_args();
+		$customData=null;
+		if (file_exists($customDataFilePath)) {
+			$customData=json_decode($customDataFilePath,true);
+		}
+		for ($i=2,$numArgs=count($args); $i<$numArgs&&$dataset=$args[$i]; ++$i) {
+			if (is_array($dataset)) {
+				$customData=Hicurl::mergeArrays($mergeStrategy,$customData,$dataset);
+			} else {
+				$customData=Hicurl::mergeArrays($mergeStrategy,[$customData],[$dataset])[0];
+			}
+		}
+		file_put_contents($customDataFilePath, $customData);
+	}
+	
+	private static function mergeArrays($mergeStrategy,$array1,$array2) {
+		foreach ($array2 as $key=>$value) {
+			if (is_array($value)&&is_array($array1[$key])) {
+				$array1[$key]=Hicurl::mergeArrays($mergeStrategy, $array1[$key], $value);
+			} if (isset($array1[$key])&&$mergeStrategy=='+'&&is_string($value)) {
+				$array1[$key].=$value;
+			} else if (isset($array1[$key])&&isset($value)&&$mergeStrategy=='+') {
+				$array1[$key]+=$value;
+			} else if ($mergeStrategy=='-'&&is_scalar($value)) {
+				if (isset($array1[$key])) {
+					$array1[$key]=-$value;
+				} else {
+					$array1[$key]-=$value;
+				}
+			} else {
+				$array1[$key]=$value;
+			}
+		}
+		return $array1;
+	}
+	
+	
+	/**
+	 * Compresses the specified history-folder.
+	 * This is to be done when writing to the history-file is complete, as it naturally puts the history in a closed
+	 * state. If this method is called on an already compressed history-folder then it will simply return false.
+	 * It is recommended that this is called separated from the logic that writes to the history, or in a separate
+	 * thread/process since it may take a long time finish.
+	 * @param string $historyFolderPath Path-string of the history-folder to be compressed.
 	 * @return bool Returns TRUE on success or FALSE on failure.*/
-	public static function compileHistoryStatic($historyFolderPath,$customData=null) {
+	public static function compressHistoryStatic($historyFolderPath) {
 		$startTime=microtime(true);
 		$historyFolderPath=realpath($historyFolderPath);
 		$historyPagesFolderPath=$historyFolderPath.DIRECTORY_SEPARATOR.'pages';
@@ -424,13 +521,6 @@ class Hicurl {
 		$historyPagesArchive=$historyFolderPath.DIRECTORY_SEPARATOR.'pages.7z';
 		if(!function_exists('exec')) {
 			trigger_error("Access to system shell is currently mandatory.", E_USER_ERROR);
-		}
-		
-		if (isset($customData)) {
-			$historyDayaFileObject=new SplFileObject($historyDataFilePath,'r+');
-			$historyDayaFileObject->fseek(-1, SEEK_END);//seek to pos before closing "}"
-			$historyDayaFileObject->fwrite(',"customData":'.json_encode($customData).'}');
-			$historyDayaFileObject=null;
 		}
 		
 		$command='cd "'.__DIR__.'"'//cd to same folder as this very file so that 7za.exe may be used
@@ -476,10 +566,10 @@ class Hicurl {
 	 * JS Hicurl constructor as the second argument (dataUrl)
 	 * @param string $historyFolderPath Path-string of the history-folder to be served.*/
 	public static function serveHistoryStatic($historyFolderPath) {
-		$compiled=file_exists("$historyFolderPath/data.json.gz");
+		$isCompressed=Hicurl::isCompressed("$historyFolderPath/data.json.gz");
 		$cache=true;
 		if (isset($_GET['getJsonList'])) {
-			if ($compiled) {
+			if ($isCompressed) {
 				Hicurl::servePrecompressedGZ("$historyFolderPath/data.json.gz");
 			} else {
 				readfile("$historyFolderPath/data.json");
@@ -487,7 +577,7 @@ class Hicurl {
 			}
 		} else {
 			$historyFolderPath=realpath($historyFolderPath);
-			if ($compiled) {
+			if ($isCompressed) {
 				$command='cd "'.__DIR__.'"'//cd to same folder as this very file
 				.' && 7za e "'.$historyFolderPath.DIRECTORY_SEPARATOR
 						."pages.7z\" \"$_GET[getPageContent]\" -so 2>7za_e_log.txt";
@@ -504,6 +594,10 @@ class Hicurl {
 			header("Pragma: no-cache"); //HTTP 1.0
 			header("Expires: Sat, 26 Jul 1997 05:00:00 GMT"); // Date in the past
 		}
+	}
+	
+	private static function isCompressed($historyFolderPath) {
+		return file_exists("$historyFolderPath/data.json.gz");
 	}
 	
 	/**
