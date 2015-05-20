@@ -3,25 +3,28 @@
 
 
 /**
- * A class that simplifies URL requests and adds new functionality, like saving history of requests.
+ * A class that simplifies URL requests and adds new functionality, like saving history of requests
  * with their contens/headers.*/
 class Hicurl {
 	
-	/**
-	 * @var array This is an array of settings which the user can define. They are set either through the
+	/**@var array This is an array of settings which the user can define. They are set either through the
 	 * class-constructor or via settings(). {@see settings()} for more info.*/
 	private $settingsData;
 	
-	/**
-	 * @var resource Curl Handler*/
+	/**@var resource Curl Handler*/
 	private $curlHandler;
 	
-	/**
-	 * @var SplFileObject file-object for the history file.*/
-	private $historyFileObject;
+	/**@var SplFileObject file-object for the history file.*/
+	private $historyDataFileObject;
 	
-	/**
-	 * @var array Default settings used when creating an instance of Hicurl or calling its load-methods statically.*/
+	/**@var SplFileObject file-object for customData.json(.gz)*/
+	private $customDataFileObject;
+	
+	private $isHistoryCompressed;
+	
+	private $historyFolderPath;
+	
+	/**@var array Default settings used when creating an instance of Hicurl or calling its load-methods statically.*/
 	static public $defaultSettings=[
 		'acceptStatusCodes'=>[200,201,202,203,204,205,206,207,208,226,300,301,302,303,304,305,306,307,308],
 		'maxFruitlessRetries'=>40,
@@ -32,16 +35,21 @@ class Hicurl {
 	];
 	
 	/**
-	 * Constructs an instance of Hicurl with the given settings.
-	 * @see Hicurl::loadSingleStatic() blah
-	 * @see loadSingleStatic() blah
-	 * @see loadSingleStatic blah
-	 * @param array $settings The same data as can be passed to settings().*/
-    function __construct($settings=[]) {
+	 * Constructs an instance of Hicurl with the given settings and optionally a directory to save history to.
+	 * @param array $settings The same data as can be passed to settings().
+	 * @param string $historyFolderPath	Path to a directory of where to save history to.
+	 *		Setting it enables history-saving. All contents of requested pages along with request/response-headers
+	 *		will be saved to this directory. If the specified folder doesn't exist then it will automatically be
+	 *		created(recusively). When no more writing is to be done to this folder it's a good idea to call
+	 *		compressHistory() on it.*/
+    function __construct($settings=null,$historyFolderPath=null) {
 		$this->settingsData=Hicurl::$defaultSettings;
 		if ($settings)
 			$this->settings($settings);
 		$this->curlHandler=curl_init();
+		if (isset($historyFolderPath)) {
+			$this->setupHistoryFolder($historyFolderPath);
+		}
     }
 	
 	/**
@@ -53,7 +61,7 @@ class Hicurl {
 	 * returns the current settings.
 	 * Otherwise an array with a combination of the following settings should be passed:
 	 *	<ul>
-	 *		<li>'acceptStatusCodes' int[] Defaults to [200]. An array of HTTP status codes to accept. Any request with
+	 *		<li>'acceptStatusCodes' int[] An array of HTTP status codes to accept. Any request with
 	 *			a status code not in this list will be considered failed.</li>
 	 *		<li>'maxFruitlessRetries' int Defaults to 40. Max amount of retries before a load-function gives up. For
 	 *			loadSingle this is simply the number of retries for that url. For loadMulti it is the max number of
@@ -76,27 +84,11 @@ class Hicurl {
 	 *		</li>
 	 *		<li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
 	 *		<li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
-	 *		<li>'history' string Path to a directory of where to save history to.<br>
-	 *			Setting this option enables history-saving. All contents of requested pages along with
-	 *			request/response-headers willbe saved to this directory. If the specified folder doesn't exist then it
-	 *			will automatically be created(recusively). When done with the directory it should be compiled into a
-	 *			single file using {@see compile()}.
-	 *		</li>
 	 *		<li>'tor' bool If true then a proxy on port 9050 will be used for the requsts.</li>
 	 *	</ul>
 	 * @return array The resulted settings*/
 	public function settings($settings=null) {
 		if ($settings) {
-			if (array_key_exists('history',$settings)) {//if a setting for 'history' is present
-				$historyPath=$settings['history'];
-				if (!$historyPath) {//if its null/false
-					$this->historyFileObject=null;//then close old connection
-
-					//else if it is non null/false and that it isn't equal to what's already set
-				} else if (!isset($this->historyFileObject)||$historyPath!=$this->$historyPath) {
-					$this->historyFileObject=Hicurl::setupHistoryFolder($historyPath);
-				}
-			}
 			//merge supplied settings with current settings of instance
 			$this->settingsData=$settings+$this->settingsData;
 		}
@@ -104,39 +96,42 @@ class Hicurl {
 	}
 	
 	/**
-	 * Set ups the folder set in settings['history'].
-	 * Creates the folder if it doesn't already exist and creates "data.json" with
-	 * initial strucuture-data which also will be returned.
-	 * @param string $historyPath The path to the history-folder.
-	 * @return \SplFileObject The fileObject for the created "data.json" in the folder*/
-	private static function setupHistoryFolder($historyPath) {
-		if (file_exists($historyPath)) {
-			trigger_error("Hicurl history option is set to a file. It should be set to a path to a "
-				. "folder which may or may not exist.", E_USER_ERROR);
+	 * Sets up the history-folder supplied to the Hicurl-constructor.
+	 * It creates the folder if it doesn't already exist along with its "pages"-folder and also creates
+	 * "data.json" with initial strucuture-data.
+	 * @param string $historyPath The path to the history-folder.*/
+	private function setupHistoryFolder($historyPath) {
+		$this->historyFolderPath=$historyPath;
+		if ($this->isHistoryCompressed=file_exists("$historyPath/data.json.gz")) {
+			if (file_exists("$historyPath/customData.json.gz")) {
+				$this->customDataFileObject=new SplFileObject("$historyPath/customData.json.gz");
+			}
+		} else if (file_exists("$historyPath/customData.json")) {
+				$this->customDataFileObject=new SplFileObject("$historyPath/customData.json");
 		}
-
-		//race conditions accounted for.
-		//if a race-condition occurs here where thread A sees that the folder doesn't exist(condition above),
-		//then thread B creates it with next line, and thread A tries to create it as well mkdir will simply
-		//return false, no error will be thrown.
+		if (file_exists($historyPath)&&!is_dir($historyPath)) {
+			trigger_error("A path to a file was given as Hicurl history-folder It should be set to a path to a "
+				. "folder(possibly non existent).", E_USER_ERROR);
+		}
+		
 		mkdir($historyPath, 0777, true);
 		mkdir("$historyPath/pages");
-		$historyDataFileObject=new SplFileObject("$historyPath/data.json",'c+');
+		$this->historyDataFileObject=new SplFileObject("$historyPath/data.json",'c+');
 		
-		//lock file with non-block. if it is already locked then skip this block and just return the file-object.
+		//lock file with non-block. if it is already locked then skip this block.
 		//if it's locked then we know base-structure has been written to it anway.
-		if ($historyDataFileObject->flock(LOCK_EX)) {
+		if ($this->historyDataFileObject->flock(LOCK_EX)) {
 			//write base-structure if size is zero
-			if ($historyDataFileObject->fstat()['size']==0) {
-				$historyDataFileObject->fwrite('{"pages":[]}');
+			if ($this->historyDataFileObject->fstat()['size']==0) {
+				$this->historyDataFileObject->fwrite('{"pages":[]}');
 			}
-			$historyDataFileObject->flock(LOCK_UN);
+			$this->historyDataFileObject->flock(LOCK_UN);
 		}
-		return $historyDataFileObject;
+		
 	}
 	
 	/**
-	 * Writes history to a history-directory set in settings['history'] . Each page-content gets its own file,
+	 * Writes history to the history-folder. Each page-content gets its own file in the "pages"-folder,
 	 * and there's also a json-file of the name "data.json" that is written to which is shared among all requests.
 	 * The structure of "data.json" is as follows:
 	 * <ul>
@@ -166,22 +161,15 @@ class Hicurl {
 	 *		</li>
 	 *		<li>["customData"]</li>
 	 * </ul>
-	 * @param SplFileObject $historyDataFileObject The file-object of the "data.json"-file in $historyDirectory.
-	 * @param string[] $pageContents An indexed array of content-strings for this page. Contains 1 usually but more when
-	 *		requests fail.
+	 * @param string[] $pageContents An indexed array of content-strings for this page. Contains 1 usually but one
+	 *		more is added for each failed request.
 	 * @param array $pageObject A page object as in the "pages"-array described in the description of this method,
 	 *			minus the "content"-element of the elements in the "exchanges"-array. Each element of the
 	 *			"exchanges"-array corresponds to one content with the same index in the $pageContents-argument.
-	 * @param array $settings
-	 * @param array $historyOptions*/
-	private static function writeHistory($historyDataFileObject,$pageContents,$pageObject,$settings,$historyOptions) {
-		
-		$historyDirectory=$settings['history'];
-		//$historyDataFileObject->rewind();
-		
-		//$historyData=json_decode($historyDataFileObject->fread($historyDataFileObject->fstat()['size']),true);
+	 * @param array $historyOptions The history-options passed to the load-method.*/
+	private function writeHistory($pageContents,$pageObject,$historyOptions) {
 		$numExchanges=count($pageContents);
-		$historyDataFileObject->flock(LOCK_EX);
+		$this->historyDataFileObject->flock(LOCK_EX);
 		for ($i=0; $i<$numExchanges; ++$i) {
 			if (isset($historyOptions['name'])) {
 				$wantedFileName=preg_replace("([^\w\s\d\-_~,;:\[\]\(\)])", '', $historyOptions['name']);
@@ -191,25 +179,24 @@ class Hicurl {
 			if ($numExchanges>1)
 				$wantedFileName.="_$i";
 			$fileName=$wantedFileName;
-			for ($j=0; file_exists("$historyDirectory/pages/$fileName"); ++$j) {       
+			for ($j=0; file_exists("$this->historyFolderPath/pages/$fileName"); ++$j) {       
 				$fileName=$wantedFileName."($j)";
 			}
 			
 			//locking not needed since this can only be run by one thread at a time, which is the one that holds the
 			//lock of $historyDataFileObject
-			file_put_contents("$historyDirectory/pages/$fileName", $pageContents[$i]);
+			file_put_contents("$this->historyFolderPath/pages/$fileName", $pageContents[$i]);
 			$pageObject['exchanges'][$i]['content']=$fileName;
 		}
-		$historyDataFileObject->fseek(-2, SEEK_END);
-		$size=$historyDataFileObject->fstat()['size'];
-		$historyDataFileObject->fwrite(($size>12?',':'').json_encode($pageObject).']}');
-		$historyDataFileObject->flock(LOCK_UN);
+		$this->historyDataFileObject->fseek(-2, SEEK_END);
+		$size=$this->historyDataFileObject->fstat()['size'];
+		$this->historyDataFileObject->fwrite(($size>12?',':'').json_encode($pageObject).']}');
+		$this->historyDataFileObject->flock(LOCK_UN);
 	}
 	
 	/**
 	 * Loads a requested url, using specified settings and returns the server-response along with some data and
 	 * optionally saves data to a "history-folder".
-	 * This method has a static counterpart of the name loadSingleStatic which works just the same.
 	 * @param string $url A URL-string to load
 	 * @param array|null $formdata If this is null then the request is sent as GET. Otherwise it is sent as POST using
 	 *		this array as formdata where key=name and value=value. It may be an empty array in which case the request
@@ -242,50 +229,13 @@ class Hicurl {
 	 *			<li>1: Tor-proxy related error</li>
 	 *			</ul>
 	 *		</li>
-	 * </ul>
-	 * @see loadSingleStatic()*/
-	public function loadSingle($url,$formdata=null,$settings=[],$history=[]) {
-		//We want to pass the historyFileObject of this instance to loadSingleReal if it has one, given it doesn't
-		//(temporarily) get overwritten by the history-item in the $settings-argument of this function.
-		$historyFileObject=null;//if the next condition fails then null will be passed as history-argument
-		if ($this->historyFileObject//if the instance has a historyFileObject and there's no history-item in the
-		//$settings-argument, or if there is and its setting is the same as the one in settings of the instance
-			&&(!array_key_exists('history', $settings) || $settings['history']==$this->settingsData['history'])) {
-			$historyFileObject=$this->historyFileObject;//...then the instance fileObject will be used
-		}
-			
-		return Hicurl::loadSingleReal($this->curlHandler,$historyFileObject, $url, $formdata,
-				($settings?$settings:[])+$this->settingsData,$history);
-	}
-	
-	/**
-	 * Loads a requested url, using specified settings and returns the server-response along with some data and
-	 * optionally saves data to a "history-folder".
-	 * This method has a instance counterpart of the name loadSingle which works just the same.
-	 * @see loadSingle()*/
-	public static function loadSingleStatic($url,$formdata=null,$settings=[],$history=[]) {
-		$historyFileObject=null;
-		if (isset($settings['history']))
-				$historyFileObject=Hicurl::setupHistoryFolder($settings['history']);
-		return Hicurl::loadSingleReal(curl_init(),$historyFileObject,$url,$formdata,
-				($settings?$settings:[])+Hicurl::$defaultSettings,$history);
-	}
-	
-	/**
-	 * The method which both loadSingle and loadSingleStatic calls, and which is the "real" loading-function
-	 * @param resource $curlHandler
-	 * @param SplFileObject|null $historyFileObject The instance method loadSingle may pass its existing fileObject
-	 * @param string $url Url to load, obviously
-	 * @param array|null $formdata If null request is sent as GET, otherwise POST and with the postdata of this argument
-	 * @param array $settings See parameter $settings of loadSingle()
-	 * @param array $history See parameter $history of loadSingle()
-	 * @return array ['content' string,'headers' array,'error' string|null,'errorCode']*/
-	private static function loadSingleReal($curlHandler,$historyFileObject,$url,$formdata,$settings,$history=null) {
+	 * </ul>*/
+	public function loadSingle($url,$formdata=null,$settings=null,$history=null) {
 		$numRetries=-1;
-		Hicurl::setCurlOptions($curlHandler,$url, $formdata,$settings);
+		$settings=($settings?:[])+$this->settingsData;
+		Hicurl::setCurlOptions($url, $formdata,$settings);
 		$output=[];//this is the array that will be returned
-		if ($historyFileObject||!empty($settings['history'])) {//should we write history?
-			//see description of writeHistory() for explanation of the history-structure
+		if ($this->historyDataFileObject) {
 			$historyPage=[
 				'formData'=>$formdata,
 				'exchanges'=>[]
@@ -303,8 +253,8 @@ class Hicurl {
 				}
 				sleep($settings['fruitlessPassDelay']);
 			}
-			$content=curl_exec($curlHandler);//do the actual request. assign response-content to $content
-			$headers=curl_getinfo($curlHandler);//get the headers too
+			$content=curl_exec($this->curlHandler);//do the actual request. assign response-content to $content
+			$headers=curl_getinfo($this->curlHandler);//get the headers too
 			if ($headers['http_code']==0&&!empty($settings['tor'])) {
 				$output['errorCode']=1;
 				$output['error']="Unable to connect via tor-proxy.\nIs Tor installed and configured correctly?";
@@ -321,7 +271,7 @@ class Hicurl {
 			}
 		} while ($error);//keep looping until $error is false
 		if (isset($historyPage)) {//should we write history?
-			Hicurl::writeHistory($historyFileObject, $contents,$historyPage, $settings, $history);
+			Hicurl::writeHistory($contents,$historyPage, $history);
 		}
 		return $output+=[
 			'content'=>$content,
@@ -330,6 +280,7 @@ class Hicurl {
 			'errorCode'=>0
 		];
 	}
+	
 	
 	/**
 	 * Takes reference of content-string and utf8-encodes it if necessary and also does the validation which
@@ -348,7 +299,7 @@ class Hicurl {
 		if (strpos($headers['content_type'],'utf-8')===false) {
 			$content=utf8_encode($content);
 		}
-		if (!in_array($settings['acceptStatusCodes'], $headers['http_code'])) {
+		if (!in_array($headers['http_code'],$settings['acceptStatusCodes'])) {
 			return "HTTP code $headers[http_code]";
 		}
 		if ($settings['retryOnNull']&&$content===null) {
@@ -393,132 +344,22 @@ class Hicurl {
 	}
 	
 	/**
-	 * Compresses the specified history-folder.
-	 * This is to be done when writing to the history-file is complete, as it naturally puts the history in a closed
-	 * state. If this method is called on an already compressed history-folder then it will simply return false.
-	 * It is recommended that this is called in a process/thread separated from the logic that writes to the history,
-	 * since it may take a long time finish.
-	 * @return bool Returns TRUE on success or FALSE on failure.*/
-	public function compressHistory() {
-		$this->historyFileObject=null;//so that it can be deleted
-		return Hicurl::compressHistoryStatic($this->settingsData['history']);
-	}
-	
-	/**
-	 * Gets the custom data assigned via setCustomData().
-	 * Note that if getCustomData() is called followed by setCustomData() with data based on what getCustomData()
-	 * returned, there's no guarantee that another process/thread wrote to customData in between. Instead use the
-	 * $mergeStrategy-parameter of setCustomData() to modify data based on what it currently is.
-	 * @return mixed Decoded json-data, or null if there is none*/
-	public function getCustomData() {
-		return Hicurl::getCustomDataStatic($this->settingsData['history']);
-	}
-	
-	/**
-	 * Gets the custom data assigned via setCustomData().
-	 * Note that if getCustomData() is called followed by setCustomData() with data based on what getCustomData()
-	 * returned, there's no guarantee that another process/thread wrote to customData in between. Instead use the
-	 * $mergeStrategy-parameter of setCustomData() to modify data based on what it currently is.
-	 * @param string $historyFolderPath Path-string of the history-folder of the customData to be returned.
-	 * @return mixed Decoded json-data, or null if there is none*/
-	public static function getCustomDataStatic($historyFolderPath) {
-		if (file_exists($customData=$historyFolderPath.'/customData.json.gz')) {
-			return json_decode(gzdecode($historyFolderPath.'/customData.json.gz'),true);
-		}
-		if (file_exists($historyFolderPath.'/customData.json')) {
-			return json_decode($historyFolderPath.'/customData.json',true);
-		}
-	}
-	
-	
-	public function setCustomData() {
-		
-	}
-	
-	/**
-	 * Writes to customData. Arrays/objects from the supplied data that already exist in the current customData with
-	 * the same keys are merged recursively. Different merge-strategies may be set with the $mergeStrategy-parameter.
-	 * <br>Examples:<ol>
-	 *		<li><samp>{"foo":1}</samp> merged with <samp>{"bar":2}</samp> with merge-strategy "=" or "+" gives
-	 *		<samp>{"foo":1,"bar":2}</samp></li>
-	 *		<li><samp>{"foo":1}</samp> merged with <samp>{"foo":2}</samp> with merge-strategy "+" gives
-	 *		<samp>{"foo":3}</samp></li>
-	 *		<li><samp>{"foo":1}</samp> merged with <samp>{"foo":2}</samp> with merge-strategy "=" gives
-	 *		<samp>{"foo":2}</samp></li>
-	 *		<li><samp>{"foo":1}</samp> merged with <samp>{"foo":2}</samp> with merge-strategy "-" gives
-	 *		<samp>{"foo":-1}</samp></li>
-	 *		<li><samp>{"foo":{"bar":3}}</samp> merged with <samp>{"foo":{bar:5},"baz":5}</samp> with merge-strategy "+"
-	 *		gives <samp>{"foo":{"bar":8},"baz":5}</samp></li>
-	 * </ol>
-	 * @param string $historyFolderPath Path-string of the history-folder of the customData to be written to.
-	 * @param string $mergeStrategy Specifies how the supplied data is to be merged with the current data.
-	 * Possible values are:<ul>
-	 *		<li>"+": Elements with matching keys are added together. For numbers they are simply added together with
-	 *			the + operator, for strings the supplied one is appended to the current one.</li>
-	 *		<li>"-": For numbers with matching keys the supplied ones are substracted from the current ones.
-	 *				For strings, the same behavior as "=" is used.</li>
-	 *		<li>"=": For elements with matching keys, those in the current data
-	 *			are replaced by those in the supplied data.</li>
-	 * </ul>
-	 * @param mixed $data The data to be written to customData. It may be anything that is JSON-conversion-friendly.
-	 * @param mixed $data,... unlimited Optional additional datasets. */
-	public static function setCustomDataStatic($historyFolderPath,$mergeStrategy,$data) {
-		$customDataFilePath=$historyFolderPath.'/customData.json';
-		$args=func_get_args();
-		$customData=null;
-		if (file_exists($customDataFilePath)) {
-			$customData=json_decode($customDataFilePath,true);
-		}
-		for ($i=2,$numArgs=count($args); $i<$numArgs&&$dataset=$args[$i]; ++$i) {
-			if (is_array($dataset)) {
-				$customData=Hicurl::mergeArrays($mergeStrategy,$customData,$dataset);
-			} else {
-				$customData=Hicurl::mergeArrays($mergeStrategy,[$customData],[$dataset])[0];
-			}
-		}
-		file_put_contents($customDataFilePath, $customData);
-	}
-	
-	private static function mergeArrays($mergeStrategy,$array1,$array2) {
-		foreach ($array2 as $key=>$value) {
-			if (is_array($value)&&is_array($array1[$key])) {
-				$array1[$key]=Hicurl::mergeArrays($mergeStrategy, $array1[$key], $value);
-			} if (isset($array1[$key])&&$mergeStrategy=='+'&&is_string($value)) {
-				$array1[$key].=$value;
-			} else if (isset($array1[$key])&&isset($value)&&$mergeStrategy=='+') {
-				$array1[$key]+=$value;
-			} else if ($mergeStrategy=='-'&&is_scalar($value)) {
-				if (isset($array1[$key])) {
-					$array1[$key]=-$value;
-				} else {
-					$array1[$key]-=$value;
-				}
-			} else {
-				$array1[$key]=$value;
-			}
-		}
-		return $array1;
-	}
-	
-	
-	/**
-	 * Compresses the specified history-folder.
+	 * Compresses the history-folder.
 	 * This is to be done when writing to the history-file is complete, as it naturally puts the history in a closed
 	 * state. If this method is called on an already compressed history-folder then it will simply return false.
 	 * It is recommended that this is called separated from the logic that writes to the history, or in a separate
 	 * thread/process since it may take a long time finish.
-	 * @param string $historyFolderPath Path-string of the history-folder to be compressed.
 	 * @return bool Returns TRUE on success or FALSE on failure.*/
-	public static function compressHistoryStatic($historyFolderPath) {
+	public function compressHistory() {
 		$startTime=microtime(true);
-		$historyFolderPath=realpath($historyFolderPath);
-		$historyPagesFolderPath=$historyFolderPath.DIRECTORY_SEPARATOR.'pages';
+		$this->historyFolderPath=realpath($this->historyFolderPath);
+		$historyPagesFolderPath=$this->historyFolderPath.DIRECTORY_SEPARATOR.'pages';
 		if (!is_dir($historyPagesFolderPath)) {//looks like this folder already has been compiled
 			return false;
 		}
 		$historyPagesPath=$historyPagesFolderPath.DIRECTORY_SEPARATOR.'*';
-		$historyDataFilePath=$historyFolderPath.DIRECTORY_SEPARATOR.'data.json';
-		$historyPagesArchive=$historyFolderPath.DIRECTORY_SEPARATOR.'pages.7z';
+		$historyDataFilePath=$this->historyFolderPath.DIRECTORY_SEPARATOR.'data.json';
+		$historyPagesArchive=$this->historyFolderPath.DIRECTORY_SEPARATOR.'pages.7z';
 		if(!function_exists('exec')) {
 			trigger_error("Access to system shell is currently mandatory.", E_USER_ERROR);
 		}
@@ -541,7 +382,7 @@ class Hicurl {
 			
 			$oldSize=$pagesArchiveInfo['uncompressedSize']+$dataArchiveInfo['uncompressedSize'];
 			$newSize=$pagesArchiveInfo['compressedSize']+$dataArchiveInfo['compressedSize'];
-			file_put_contents("$historyFolderPath/info.txt", 
+			file_put_contents("$this->historyFolderPath/info.txt", 
 				"Compiled history at ".date("D M d, Y G:i",$startTime)."\r\n"
 				.($pagesArchiveInfo['numFiles']+1)." files at a total size of "
 				.Hicurl::formatBytes($oldSize)
@@ -553,23 +394,57 @@ class Hicurl {
 		return !$return_var;
 	}
 	
-	/**
-	 * Writes history to the output-stream. The url of a page that calls this method is to be passed to the
-	 * JS Hicurl constructor as the second argument (dataUrl)
-	 * @param string $historyFolderPath Path-string of the history-folder to be served.*/
-	public function serveHistory($historyFolderPath) {
-		Hicurl::serveHistoryStatic($this->settingsData['history']);
+	public function getCustomData($forUpdate=false) {
+		if (!$this->customDataFileObject) {
+			$customDataPath="{$this->settingsData['history']}/customData.json";
+			if (file_exists($customDataPath)) {
+				$this->customDataFileObject=new SplFileObject($customDataPath,"c+");
+			} else if (file_exists($customDataPath.'.gz')) {
+				$this->customDataFileObject=new SplFileObject($customDataPath.'.gz',"c+");
+			} else {
+				return null;
+			}
+		}
+		$isCompressed=$this->customDataFileObject->getExtension()=='gz';
+		if ($isCompressed&&$forUpdate) {
+			trigger_error('Can\'t get custom data from compressed history with $forUpdate set to TRUE.', E_USER_ERROR);
+		}
+		$this->customDataFileObject->flock($forUpdate?LOCK_EX:LOCK_SH);
+		$customData=$this->customDataFileObject->fread($this->customDataFileObject->fstat()['size']);
+		if ($isCompressed) {
+			$customData=gzdecode($customData);
+		}
+		$customData=json_decode($customData,true);
+		if (!$forUpdate) {
+			$this->customDataFileObject->flock(LOCK_UN);
+		}
+		return $customData;
+	}
+
+
+	
+	public function setCustomData($data) {
+		if ($this->isHistoryCompressed) {
+			trigger_error("Can't write to custom data in compressed history.", E_USER_ERROR);
+		}
+		if (!$this->customDataFileObject) {
+			$this->customDataFileObject=new SplFileObject("$this->historyFolderPath/customData.json","c+");
+		}
+		$this->customDataFileObject->flock(LOCK_EX);
+		$this->customDataFileObject->rewind();
+		$this->customDataFileObject->ftruncate(0);
+		$this->customDataFileObject->fwrite(json_encode($data));
+		$this->customDataFileObject->flock(LOCK_UN);
 	}
 	
 	/**
 	 * Writes history to the output-stream. The url of a page that calls this method is to be passed to the
 	 * JS Hicurl constructor as the second argument (dataUrl)
 	 * @param string $historyFolderPath Path-string of the history-folder to be served.*/
-	public static function serveHistoryStatic($historyFolderPath) {
-		$isCompressed=Hicurl::isCompressed("$historyFolderPath/data.json.gz");
+	public static function serveHistory($historyFolderPath) {
 		$cache=true;
 		if (isset($_GET['getJsonList'])) {
-			if ($isCompressed) {
+			if ($this->isHistoryCompressed) {
 				Hicurl::servePrecompressedGZ("$historyFolderPath/data.json.gz");
 			} else {
 				readfile("$historyFolderPath/data.json");
@@ -577,7 +452,7 @@ class Hicurl {
 			}
 		} else {
 			$historyFolderPath=realpath($historyFolderPath);
-			if ($isCompressed) {
+			if ($this->isHistoryCompressed) {
 				$command='cd "'.__DIR__.'"'//cd to same folder as this very file
 				.' && 7za e "'.$historyFolderPath.DIRECTORY_SEPARATOR
 						."pages.7z\" \"$_GET[getPageContent]\" -so 2>7za_e_log.txt";
@@ -594,10 +469,6 @@ class Hicurl {
 			header("Pragma: no-cache"); //HTTP 1.0
 			header("Expires: Sat, 26 Jul 1997 05:00:00 GMT"); // Date in the past
 		}
-	}
-	
-	private static function isCompressed($historyFolderPath) {
-		return file_exists("$historyFolderPath/data.json.gz");
 	}
 	
 	/**
@@ -636,12 +507,11 @@ class Hicurl {
 	
 	/**
 	 * Generates the options that are used for the curl object and sets them to the curl-handler.
-	 * @param resource $curlHandler The curl-handler that the options should be set to
 	 * @param string $url The url for the request
 	 * @param array|null $formdata If post-request then this should be an associative array of the formdata.
 	 * @param array $settings Current settings
 	 * @return void*/
-	private static function setCurlOptions($curlHandler,$url,$formdata,$settings) {
+	private function setCurlOptions($url,$formdata,$settings) {
 		$curlOptions=[
 			CURLOPT_URL => $url,
 			CURLOPT_RETURNTRANSFER => true,
@@ -672,9 +542,9 @@ class Hicurl {
 		}
 		//By resetting the settings like this it suffices to write settings to $curlOptions depending on what is
 		//*set* in $settings. We don't have to negate effects of settings that are *not set* in $setting
-		curl_reset($curlHandler);
+		curl_reset($this->curlHandler);
 		
-		curl_setopt_array($curlHandler,$curlOptions);
+		curl_setopt_array($this->curlHandler,$curlOptions);
 	}
 	
 	/**

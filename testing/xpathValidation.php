@@ -11,5 +11,5 @@ $result=$hicurl->loadSingle('https://www.random.org/integers/?num=1&min=1&max=10
 		'maxFruitlessRetries'=>20,
 		'fruitlessPassDelay'=>0,	
 	]);
-$hicurl->compileHistory();
+$hicurl->compressHistory();
 include "assets/test.htm";
