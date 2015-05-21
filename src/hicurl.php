@@ -4,7 +4,9 @@
 
 /**
  * A class that simplifies URL requests and adds new functionality, like saving history of requests
- * with their contens/headers.*/
+ * with their contens/headers.
+ * @property-read bool|null $isHistoryCompressed Tells if history-folder is compressed.
+ *		True if it is, false if it's not and null if there is no history-folder*/
 class Hicurl {
 	
 	/**@var array This is an array of settings which the user can define. They are set either through the
@@ -391,6 +393,7 @@ class Hicurl {
 				."Time taken: $passedHours hours, $passedMins minutes and $passedSecs seconds"
 			);
 		}
+		$this->isHistoryCompressed=true;
 		return !$return_var;
 	}
 	
@@ -570,8 +573,11 @@ class Hicurl {
 			echo gzdecode (file_get_contents($filePath));
 	}
 	function __get($name) {
-        if($name === 'isHistoryCompressed')
-            return $this->isHistoryCompressed;
-        user_error("Invalid property: " . __CLASS__ . "->$name");
+        switch($name) {
+			case 'isHistoryCompressed':
+				return $this->isHistoryCompressed;
+			default:
+				user_error("Invalid property: " . __CLASS__ . "->$name");	
+		}
     }
 }
