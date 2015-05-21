@@ -405,13 +405,13 @@ class Hicurl {
 				return null;
 			}
 		}
-		$isCompressed=$this->customDataFileObject->getExtension()=='gz';
-		if ($isCompressed&&$forUpdate) {
+		$this->isHistoryCompressed=$this->customDataFileObject->getExtension()=='gz';
+		if ($this->isHistoryCompressed&&$forUpdate) {
 			trigger_error('Can\'t get custom data from compressed history with $forUpdate set to TRUE.', E_USER_ERROR);
 		}
 		$this->customDataFileObject->flock($forUpdate?LOCK_EX:LOCK_SH);
 		$customData=$this->customDataFileObject->fread($this->customDataFileObject->fstat()['size']);
-		if ($isCompressed) {
+		if ($this->isHistoryCompressed) {
 			$customData=gzdecode($customData);
 		}
 		$customData=json_decode($customData,true);
@@ -569,4 +569,9 @@ class Hicurl {
 		} else
 			echo gzdecode (file_get_contents($filePath));
 	}
+	function __get($name) {
+        if($name === 'isHistoryCompressed')
+            return $this->isHistoryCompressed;
+        user_error("Invalid property: " . __CLASS__ . "->$name");
+    }
 }
