@@ -112,7 +112,7 @@ class Hicurl {
 				$this->customDataFileObject=new SplFileObject("$historyPath/customData.json");
 		}
 		if (file_exists($historyPath)&&!is_dir($historyPath)) {
-			trigger_error("A path to a file was given as Hicurl history-folder It should be set to a path to a "
+			trigger_error("A path to a file was given as Hicurl history-folder. It should be set to a path to a "
 				. "folder(possibly non existent).", E_USER_ERROR);
 		}
 		
@@ -433,7 +433,7 @@ class Hicurl {
 		if ($this->isHistoryCompressed) {
 			trigger_error("Can't write to custom data in compressed history.", E_USER_ERROR);
 		}
-		$this->customDataFileObject=new SplFileObject("$this->historyFolderPath/customData.json","w");
+		$this->customDataFileObject=new SplFileObject("$this->historyFolderPath/customData.json","c+");
 		$this->customDataFileObject->flock(LOCK_EX);
 		$this->customDataFileObject->fwrite(json_encode($data));
 		$this->customDataFileObject->flock(LOCK_UN);
