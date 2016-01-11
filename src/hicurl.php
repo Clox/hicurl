@@ -116,8 +116,9 @@ class Hicurl {
 				. "folder(possibly non existent).", E_USER_ERROR);
 		}
 		
-		mkdir($historyPath, 0777, true);
-		mkdir("$historyPath/pages");
+		if (!file_exists("$historyPath/pages")) {
+			mkdir("$historyPath/pages", 0777, true);
+		}
 		$this->historyDataFileObject=new SplFileObject("$historyPath/data.json",'c+');
 		
 		//lock file with non-block. if it is already locked then skip this block.
@@ -330,7 +331,9 @@ class Hicurl {
 		$domDocument=new DOMDocument();
 		//Slap on this meta-tag which sets encoding to utf-8. Otherwise utf8 content gets corrupted. This doesn't seem
 		//to ever do any damage to pages that are not utf8 encoded or already have this tag...
+		libxml_use_internal_errors(true);
 		$domDocument->loadHTML('<meta http-equiv="content-type" content="text/html; charset=utf-8">'.$pageContent);
+		libxml_use_internal_errors(false);
 		$domXpath=$outputArray['domXPath']=new DOMXPath($domDocument);
 		//if it's set to true then we do not do any validation, but instead just assign domXpath to return-object.
 		if ($xpath!==true) {
@@ -365,7 +368,7 @@ class Hicurl {
 		if(!function_exists('exec')) {
 			trigger_error("Access to system shell is currently mandatory.", E_USER_ERROR);
 		}
-		
+		$this->historyDataFileObject=null;//remove pointer to the file so that it may be accesed by cli
 		$command='cd "'.__DIR__.'"'//cd to same folder as this very file so that 7za.exe may be used
 				." && 7za a \"$historyPagesArchive\" \"$historyPagesPath\""//compress the files in the pages-folder
 				." && 7za a \"$historyDataFilePath.gz\" \"$historyDataFilePath\""//..and data.json
@@ -430,12 +433,8 @@ class Hicurl {
 		if ($this->isHistoryCompressed) {
 			trigger_error("Can't write to custom data in compressed history.", E_USER_ERROR);
 		}
-		if (!$this->customDataFileObject) {
-			$this->customDataFileObject=new SplFileObject("$this->historyFolderPath/customData.json","c+");
-		}
+		$this->customDataFileObject=new SplFileObject("$this->historyFolderPath/customData.json","w");
 		$this->customDataFileObject->flock(LOCK_EX);
-		$this->customDataFileObject->rewind();
-		$this->customDataFileObject->ftruncate(0);
 		$this->customDataFileObject->fwrite(json_encode($data));
 		$this->customDataFileObject->flock(LOCK_UN);
 	}
@@ -483,7 +482,7 @@ class Hicurl {
 	 *		<li>'numFiles' int Number of files in the archive</li></ul>*/
 	private static function getArchiveInfo($archivePath) {
 		$archivePath=realpath($archivePath);
-		exec("7za l \"$archivePath\"",$output);
+		exec('cd "'.__DIR__."\" && 7za l \"$archivePath\"",$output);
 		$archiveData=$output[count($output)-6];
 		return [
 			'uncompressedSize'=>(int)substr($archiveData,26,12),
