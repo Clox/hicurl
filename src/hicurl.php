@@ -374,23 +374,15 @@ class Hicurl {
 		$this->customDataFileObject=null;
 		
 		$delFileCmd=PHP_OS=="Linux"?"rm":"del";
+		$delDirCmd=PHP_OS=="Linux"?"rmdir -rf":"rmdir/s/q";
 		$command="7z a \"$historyPagesArchive\" \"$historyPagesPath\""//compress the files in the pages-folder
 				." && 7z a \"$historyDataFilePath.gz\" \"$historyDataFilePath\""//..and data.json
 				//remove source files. this method is about 43% faster than php glob()+unlink()
-				." && rmdir \"$historyPagesFolderPath\" && $delFileCmd $historyDataFilePath";
+				." && $delDirCmd \"$historyPagesFolderPath\" && $delFileCmd $historyDataFilePath";
 		if (file_exists($historyCustomDataPath)) //deal with customData
 			$command.=" && 7z a \"$historyCustomDataPath.gz\" \"$historyCustomDataPath\""
 					. " && $delFileCmd $historyCustomDataPath";
 		
-		
-		$command='cd "'.__DIR__.'"'//cd to same folder as this very file so that 7za.exe may be used
-				." && 7za a \"$historyPagesArchive\" \"$historyPagesPath\""//compress the files in the pages-folder
-				." && 7za a \"$historyDataFilePath.gz\" \"$historyDataFilePath\""//..and data.json
-				//remove source files. this method is about 43% faster than php glob()+unlink()
-				." && rmdir /s/q \"$historyPagesFolderPath\" && del /f/s/q $historyDataFilePath";
-		if (file_exists($historyCustomDataPath)) //deal with customData
-			$command.=" && 7za a \"$historyCustomDataPath.gz\" \"$historyCustomDataPath\""
-					. " && del /f/s/q $historyCustomDataPath";
 		exec($command,$output,$return_var);
 		$timeTaken=microtime(true)-$startTime;
 		if (!$return_var) {//if previous command was successful
@@ -475,9 +467,8 @@ class Hicurl {
 		} else {
 			$historyFolderPath=realpath($historyFolderPath);
 			if ($this->isHistoryCompressed) {
-				$command='cd "'.__DIR__.'"'//cd to same folder as this very file
-				.' && 7za e "'.$historyFolderPath.DIRECTORY_SEPARATOR
-						."pages.7z\" \"$_GET[getPageContent]\" -so 2>7za_e_log.txt";
+				$command='7z e "'.$historyFolderPath.DIRECTORY_SEPARATOR
+						."pages.7z\" \"$_GET[getPageContent]\" -so 2>7z_e_log.txt";
 				system($command);
 			}
 		}
@@ -494,7 +485,7 @@ class Hicurl {
 	}
 	
 	/**
-	 * Gets info on an archive using 7za
+	 * Gets info on an archive using 7z
 	 * @param string $archivePath Path the archive
 	 * @return array Returns an array with the following elements: <ul>
 	 *		<li>'uncompressedSize' int Size of the contents of the archives before compression, in bytes</li>
@@ -502,7 +493,7 @@ class Hicurl {
 	 *		<li>'numFiles' int Number of files in the archive</li></ul>*/
 	private static function getArchiveInfo($archivePath) {
 		$archivePath=realpath($archivePath);
-		exec('cd "'.__DIR__."\" && 7za l \"$archivePath\"",$output);
+		exec("7z l \"$archivePath\"",$output);
 		$archiveData=$output[count($output)-6];
 		return [
 			'uncompressedSize'=>(int)substr($archiveData,26,12),
