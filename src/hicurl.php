@@ -374,7 +374,7 @@ class Hicurl {
 		$this->customDataFileObject=null;
 		
 		$delFileCmd=PHP_OS=="Linux"?"rm":"del";
-		$delDirCmd=PHP_OS=="Linux"?"rmdir -rf":"rmdir/s/q";
+		$delDirCmd=PHP_OS=="Linux"?"rm -rf":"rmdir/s/q";
 		$command="7z a \"$historyPagesArchive\" \"$historyPagesPath\""//compress the files in the pages-folder
 				." && 7z a \"$historyDataFilePath.gz\" \"$historyDataFilePath\""//..and data.json
 				//remove source files. this method is about 43% faster than php glob()+unlink()
