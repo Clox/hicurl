@@ -365,16 +365,32 @@ class Hicurl {
 		$historyPagesPath=$historyPagesFolderPath.DIRECTORY_SEPARATOR.'*';
 		$historyDataFilePath=$this->historyFolderPath.DIRECTORY_SEPARATOR.'data.json';
 		$historyPagesArchive=$this->historyFolderPath.DIRECTORY_SEPARATOR.'pages.7z';
+		$historyCustomDataPath=$this->historyFolderPath.DIRECTORY_SEPARATOR.'customData.json';
 		if(!function_exists('exec')) {
 			trigger_error("Access to system shell is currently mandatory.", E_USER_ERROR);
 		}
-		$this->historyDataFileObject=null;//remove pointer to the file so that it may be accesed by cli
+		//remove pointer to files so that it may be accesed by cli
+		$this->historyDataFileObject=null;
+		$this->customDataFileObject=null;
+		
+		$delFileCmd=PHP_OS=="Linux"?"rm":"del";
+		$command="7z a \"$historyPagesArchive\" \"$historyPagesPath\""//compress the files in the pages-folder
+				." && 7z a \"$historyDataFilePath.gz\" \"$historyDataFilePath\""//..and data.json
+				//remove source files. this method is about 43% faster than php glob()+unlink()
+				." && rmdir \"$historyPagesFolderPath\" && $delFileCmd $historyDataFilePath";
+		if (file_exists($historyCustomDataPath)) //deal with customData
+			$command.=" && 7z a \"$historyCustomDataPath.gz\" \"$historyCustomDataPath\""
+					. " && $delFileCmd $historyCustomDataPath";
+		
+		
 		$command='cd "'.__DIR__.'"'//cd to same folder as this very file so that 7za.exe may be used
 				." && 7za a \"$historyPagesArchive\" \"$historyPagesPath\""//compress the files in the pages-folder
 				." && 7za a \"$historyDataFilePath.gz\" \"$historyDataFilePath\""//..and data.json
-				
 				//remove source files. this method is about 43% faster than php glob()+unlink()
 				." && rmdir /s/q \"$historyPagesFolderPath\" && del /f/s/q $historyDataFilePath";
+		if (file_exists($historyCustomDataPath)) //deal with customData
+			$command.=" && 7za a \"$historyCustomDataPath.gz\" \"$historyCustomDataPath\""
+					. " && del /f/s/q $historyCustomDataPath";
 		exec($command,$output,$return_var);
 		$timeTaken=microtime(true)-$startTime;
 		if (!$return_var) {//if previous command was successful
@@ -400,6 +416,12 @@ class Hicurl {
 		return !$return_var;
 	}
 	
+	
+	/**
+	 * 
+	 * @param bool $forUpdate
+	 * @return type
+	 */
 	public function getCustomData($forUpdate=false) {
 		if (!$this->customDataFileObject) {
 			$customDataPath="{$this->settingsData['history']}/customData.json";
@@ -427,8 +449,6 @@ class Hicurl {
 		return $customData;
 	}
 
-
-	
 	public function setCustomData($data) {
 		if ($this->isHistoryCompressed) {
 			trigger_error("Can't write to custom data in compressed history.", E_USER_ERROR);
