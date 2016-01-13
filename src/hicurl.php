@@ -395,9 +395,17 @@ class Hicurl {
 			
 			$oldSize=$pagesArchiveInfo['uncompressedSize']+$dataArchiveInfo['uncompressedSize'];
 			$newSize=$pagesArchiveInfo['compressedSize']+$dataArchiveInfo['compressedSize'];
+			$numFiles=$pagesArchiveInfo['numFiles']+1;
+			if (file_exists("$historyCustomDataPath.gz")) {
+				$customDataArchiveInfo=Hicurl::getArchiveInfo("$historyCustomDataPath.gz");
+				$oldSize+=$customDataArchiveInfo['uncompressedSize'];
+				$newSize+=$customDataArchiveInfo['compressedSize'];
+				++$numFiles;
+			}
+			
 			file_put_contents("$this->historyFolderPath/info.txt", 
 				"Compiled history at ".date("D M d, Y G:i",$startTime)."\r\n"
-				.($pagesArchiveInfo['numFiles']+1)." files at a total size of "
+				.$numFiles." files at a total size of "
 				.Hicurl::formatBytes($oldSize)
 				." compressed down to ".
 					Hicurl::formatBytes($newSize)." (".round($newSize/$oldSize*100,2)."% of original)\r\n"
@@ -494,7 +502,9 @@ class Hicurl {
 	private static function getArchiveInfo($archivePath) {
 		$archivePath=realpath($archivePath);
 		exec("7z l \"$archivePath\"",$output);
-		$archiveData=$output[count($output)-6];
+		
+		//needs -6 if 7za is used because it supplies some additional info at the bottom
+		$archiveData=$output[count($output)-1];
 		return [
 			'uncompressedSize'=>(int)substr($archiveData,26,12),
 			'compressedSize'=>(int)substr($archiveData,39,12),
