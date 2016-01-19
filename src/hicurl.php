@@ -356,16 +356,12 @@ class Hicurl {
 	 * thread/process since it may take a long time finish.
 	 * @return bool Returns TRUE on success or FALSE on failure.*/
 	public function compressHistory() {
-		$startTime=microtime(true);
-		$this->historyFolderPath=realpath($this->historyFolderPath);
-		$historyPagesFolderPath=$this->historyFolderPath.DIRECTORY_SEPARATOR.'pages';
-		if (!is_dir($historyPagesFolderPath)) {//looks like this folder already has been compiled
+		if ($this->isHistoryCompressed) {//looks like this folder already has been compiled
 			return false;
 		}
-		$historyPagesPath=$historyPagesFolderPath.DIRECTORY_SEPARATOR.'*';
-		$historyDataFilePath=$this->historyFolderPath.DIRECTORY_SEPARATOR.'data.json';
-		$historyPagesArchive=$this->historyFolderPath.DIRECTORY_SEPARATOR.'pages.7z';
-		$historyCustomDataPath=$this->historyFolderPath.DIRECTORY_SEPARATOR.'customData.json';
+		$separator=DIRECTORY_SEPARATOR;
+		$startTime=microtime(true);
+		$this->historyFolderPath=realpath($this->historyFolderPath).DIRECTORY_SEPARATOR;
 		if(!function_exists('exec')) {
 			trigger_error("Access to system shell is currently mandatory.", E_USER_ERROR);
 		}
@@ -375,19 +371,18 @@ class Hicurl {
 		
 		$delFileCmd=PHP_OS=="Linux"?"rm":"del";
 		$delDirCmd=PHP_OS=="Linux"?"rm -rf":"rmdir/s/q";
-		$command="7z a \"$historyPagesArchive\" \"$historyPagesPath\""//compress the files in the pages-folder
-				." && 7z a \"$historyDataFilePath.gz\" \"$historyDataFilePath\""//..and data.json
+		$command="cd \"$this->historyFolderPath\""
+				." && 7z a pages.7z pages$separator*"//compress the files in the pages-folder
+				." && 7z a data.json.gz data.json"//..and data.json
 				//remove source files. this method is about 43% faster than php glob()+unlink()
-				." && $delDirCmd \"$historyPagesFolderPath\" && $delFileCmd $historyDataFilePath";
-		if (file_exists($historyCustomDataPath)) //deal with customData
-			$command.=" && 7z a \"$historyCustomDataPath.gz\" \"$historyCustomDataPath\""
-					. " && $delFileCmd $historyCustomDataPath";
-		
+				." && $delDirCmd pages && $delFileCmd data.json";
+		if (file_exists($this->historyFolderPath.'customData.json')) //deal with customData
+			$command.=" && 7z a customData.json.gz customData.json && $delFileCmd customData.json";
 		exec($command,$output,$return_var);
 		$timeTaken=microtime(true)-$startTime;
 		if (!$return_var) {//if previous command was successful
-			$pagesArchiveInfo=Hicurl::getArchiveInfo($historyPagesArchive);
-			$dataArchiveInfo=Hicurl::getArchiveInfo("$historyDataFilePath.gz");
+			$pagesArchiveInfo=Hicurl::getArchiveInfo($this->historyFolderPath.'pages.7z');
+			$dataArchiveInfo=Hicurl::getArchiveInfo($this->historyFolderPath."data.json.gz");
 			
 			$passedHours = floor($timeTaken / 3600);
 			$passedMins = floor(($timeTaken - ($passedHours*3600)) / 60);
@@ -396,14 +391,14 @@ class Hicurl {
 			$oldSize=$pagesArchiveInfo['uncompressedSize']+$dataArchiveInfo['uncompressedSize'];
 			$newSize=$pagesArchiveInfo['compressedSize']+$dataArchiveInfo['compressedSize'];
 			$numFiles=$pagesArchiveInfo['numFiles']+1;
-			if (file_exists("$historyCustomDataPath.gz")) {
-				$customDataArchiveInfo=Hicurl::getArchiveInfo("$historyCustomDataPath.gz");
+			if (file_exists($this->historyFolderPath.'customData.json.gz')) {
+				$customDataArchiveInfo=Hicurl::getArchiveInfo($this->historyFolderPath.'customData.json.gz');
 				$oldSize+=$customDataArchiveInfo['uncompressedSize'];
 				$newSize+=$customDataArchiveInfo['compressedSize'];
 				++$numFiles;
 			}
 			
-			file_put_contents("$this->historyFolderPath/info.txt", 
+			file_put_contents($this->historyFolderPath.'info.txt', 
 				"Compiled history at ".date("D M d, Y G:i",$startTime)."\r\n"
 				.$numFiles." files at a total size of "
 				.Hicurl::formatBytes($oldSize)
