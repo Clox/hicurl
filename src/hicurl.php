@@ -108,6 +108,7 @@ class Hicurl {
 			if (file_exists("$historyPath/customData.json.gz")) {
 				$this->customDataFileObject=new SplFileObject("$historyPath/customData.json.gz");
 			}
+			return false;
 		} else if (file_exists("$historyPath/customData.json")) {
 				$this->customDataFileObject=new SplFileObject("$historyPath/customData.json");
 		}
