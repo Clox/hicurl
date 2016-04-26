@@ -26,6 +26,8 @@ class Hicurl {
 	
 	private $historyFolderPath;
 	
+	private $saveFileHandler;
+	
 	/**@var array Default settings used when creating an instance of Hicurl or calling its load-methods statically.*/
 	static public $defaultSettings=[
 		'acceptStatusCodes'=>[200,201,202,203,204,205,206,207,208,226,300,301,302,303,304,305,306,307,308],
@@ -86,6 +88,7 @@ class Hicurl {
 	 *		</li>
 	 *		<li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
 	 *		<li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
+	 *		<li>'saveToFile' string If this is set then the response-content will be written to the specified file.</li>
 	 *		<li>'tor' bool If true then a proxy on port 9050 will be used for the requsts.</li>
 	 *	</ul>
 	 * @return array The resulted settings*/
@@ -274,6 +277,7 @@ class Hicurl {
 				$contents[]=$content;
 			}
 		} while ($error);//keep looping until $error is false
+		$this->cleanUpAfterLoad();
 		if (isset($historyPage)) {//should we write history?
 			Hicurl::writeHistory($contents,$historyPage, $history);
 		}
@@ -285,7 +289,11 @@ class Hicurl {
 		];
 	}
 	
-	
+	private function cleanUpAfterLoad() {
+		if (isset($this->saveFileHandler)) {
+			fclose($this->saveFileHandler);
+		}
+	}
 	/**
 	 * Takes reference of content-string and utf8-encodes it if necessary and also does the validation which
 	 * determines if the request was deemed successful or not, based on $settings.
@@ -547,6 +555,15 @@ class Hicurl {
 			$curlOptions[CURLOPT_PROXY]='127.0.0.1:9050';
 			$curlOptions[CURLOPT_PROXYTYPE]=CURLPROXY_SOCKS5;
 		}
+		if (!empty($settings['saveToFile'])) {
+			$dir=dirname($settings['saveToFile']);
+			if (!file_exists($dir)) {
+				mkdir($dir, 0777, true);
+			}
+			$this->saveFileHandler=fopen ($settings['saveToFile'], 'w+');
+			$curlOptions[CURLOPT_FILE]=$this->saveFileHandler;
+		}
+		
 		if (isset($formdata)) {
 			$curlOptions[CURLOPT_POST]=true;
 			foreach ($formdata as $key => $value) {
