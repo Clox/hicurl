@@ -75,11 +75,27 @@ class Hicurl {
 	 *		</li>
 	 *		<li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
 	 *		<li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
+<<<<<<< Updated upstream
 	 *		<li>'history' string
 	 *			Enables saving contents/headers of request&responses in a file for later viewing. The value should be a
 	 *			path to a history-file. If it doesn't yet exist it will be created, else it will be appended to.
 	 *			For on the structure of history-files {@see writeHistory()}</li>
 	 *		<li>'tor' bool If true then a proxy on port 9050 willbe used for the requsts.</li>
+=======
+	 *		<li>'history' string Path to a directory of where to save history to.<br>
+	 *			Setting this option enables history-saving. All contents of requested pages along with
+	 *			request/response-headers willbe saved to this directory. If the specified folder doesn't exist then it
+	 *			will automatically be created(recusively). When done with the directory it should be compiled into a
+	 *			single file using {@see compile()}.
+	 *		</li>
+	 *		<li>'jsonPayload' bool If this is set to true then the form-data will be sent as json, as a "payload"
+	 *		</li>
+	 * 		<li>'jsonResponse' bool Set this to true if a json-response is expected in which case it will be parsed
+	 *								to an associtiave array automatically.
+	 *		</li>
+	 * 
+	 *		<li>'tor' bool If true then a proxy on port 9050 will be used for the requsts.</li>
+>>>>>>> Stashed changes
 	 *	</ul>
 	 * @return array The resulted settings*/
 	public function settings($settings=null) {
@@ -281,7 +297,7 @@ class Hicurl {
 			Hicurl::writeHistory($historyFileObject, $historyPage, $settings, $history);
 		}
 		return $output+=[
-			'content'=>$content,
+			'content'=>($settings['jsonResponse']??null)?json_decode($content,true):$content,
 			'headers'=>$headers,
 			'error'=>false//(this wont overwrite an error-description if it has been written already)
 		];
