@@ -75,6 +75,7 @@ class Hicurl {
 	 *		</li>
 	 *		<li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
 	 *		<li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
+<<<<<<< HEAD
 <<<<<<< Updated upstream
 	 *		<li>'history' string
 	 *			Enables saving contents/headers of request&responses in a file for later viewing. The value should be a
@@ -82,6 +83,8 @@ class Hicurl {
 	 *			For on the structure of history-files {@see writeHistory()}</li>
 	 *		<li>'tor' bool If true then a proxy on port 9050 willbe used for the requsts.</li>
 =======
+=======
+>>>>>>> json
 	 *		<li>'history' string Path to a directory of where to save history to.<br>
 	 *			Setting this option enables history-saving. All contents of requested pages along with
 	 *			request/response-headers willbe saved to this directory. If the specified folder doesn't exist then it
@@ -90,85 +93,125 @@ class Hicurl {
 	 *		</li>
 	 *		<li>'jsonPayload' bool If this is set to true then the form-data will be sent as json, as a "payload"
 	 *		</li>
+<<<<<<< HEAD
 	 * 		<li>'jsonResponse' bool Set this to true if a json-response is expected in which case it will be parsed
 	 *								to an associtiave array automatically.
 	 *		</li>
 	 * 
 	 *		<li>'tor' bool If true then a proxy on port 9050 will be used for the requsts.</li>
 >>>>>>> Stashed changes
+=======
+	 *		<li>'jsonResponse' bool Set to true if json is expected as response in which case it will be parsed to
+	 *								an associtiave array automatically.
+	 *		</li>
+	 *		<li>'tor' bool If true then a proxy on port 9050 will be used for the requsts.</li>
+>>>>>>> json
 	 *	</ul>
 	 * @return array The resulted settings*/
 	public function settings($settings=null) {
-		if (!$settings)
-			return $this->settingsData;
-		if (array_key_exists('history',$settings)) {//if a setting for 'history' is present
-			if (!$settings['history']) {//if its null/false
-				$this->historyFileObject=null;//then close old connection
-			} else if (!isset($this->historyFileObject)||$settings['history']!=$this->settingsData['history']) {
-				$this->historyFileObject=new SplFileObject($settings['history'],'c+');
-				$this->historyFileObject->historyEmpty=!$this->historyFileObject->getSize();
+		if ($settings) {
+			if (array_key_exists('history',$settings)) {//if a setting for 'history' is present
+				$historyPath=$settings['history'];
+				if (!$historyPath) {//if its null/false
+					$this->historyFileObject=null;//then close old connection
+
+					//else if it is non null/false and that it isn't equal to what's already set
+				} else if (!isset($this->historyFileObject)||$historyPath!=$this->$historyPath) {
+					$this->historyFileObject=Hicurl::setupHistoryFolder($historyPath);
+				}
 			}
+			//merge supplied settings with current settings of instance
+			$this->settingsData=$settings+$this->settingsData;
 		}
-		//merge supplied settings with current settings of instance
-		return $this->settingsData=$settings+$this->settingsData;
+		return $this->settingsData;
 	}
-	
+	private static function setupHistoryFolder($historyPath) {
+		if (!is_dir($historyPath)) {//if the specified folder does not exist
+			if (file_exists($historyPath)) {//or it does exist but it is not actually a folder but a file
+				trigger_error("Hicurl history option is set to a file. It should be set to a path to a "
+					. "folder which may or may not exist.", E_USER_ERROR);
+			}
+			mkdir($historyPath, 0777, true);
+		}
+		$historyDataFileObject=new SplFileObject($historyPath."/data.json",'c+');
+		$historyDataFileObject->flock(LOCK_EX);
+		if ($historyDataFileObject->fstat()['size']==0) {
+			$historyDataFileObject->fwrite('{"pages":[]}');
+		}
+		$historyDataFileObject->flock(LOCK_UN);
+	}
 	/**
-	 * Function that writes history to the uncompiled history-file.
-	 * History-files are "uncompiled" before Hicurl::compileHistory has been called on them, which generates a
-	 * history-file of cosed state.
-	 * In its uncompiled state its structure is as follows:
-	 *		(historyData without closing bracket and brace)+(tempHistoryData)+(sizeOfTempHistoryData)
-	 * historyData is the following json-object: {"pages":[]}
-	 * But in the uncompiled file it is without the closing bracket+brace as stated above. Each element in its
-	 * pages-array is the following:<pre>
-	 * {	"formData"://this is present if it was a POST-request, and will contain the sent form-data
-	 *		,"name"://a name-string for the page that will be shown in the history-viewer. Set via historyData>name
-	 *		,"parentIndex": int//may hold an pointing to an index of another page in the pages-array. This will then be
-	 *			shown in the tree-view of the history-viewer. This is set up with loadSingle>historyData>id/parentId
-	 *		,"customData": //contains what was passed to customData-parameter of the load method if anything
-	 *		,"exchanges": [//An array of request&response pairs. Usually this will only contain one
-	 *								//element but more will be added for each failed request
-	 *			{
-	 *				"error": false if no error, otherwise an explanation of the error
-	 *				"content": the content of the page sent from the server
-	 *				"headers": ...and the headers
-	 *			}
-	 *		...
-	 *		]
-	 * }
-	 * </pre>
-	 * @param SplFileObject $historyFileObject
-	 * @param string $data A undecoded page-object, explained in the description of this method.
+	 * Writes history to a history-directory. Each page-content gets its own file, and there's also a json-file of the
+	 * name "data.json" that is shared among all requests.
+	 * The structure of "data.json" is as follows:
+	 * <ul>
+	 *		<li>["pages"] array An array where each page (eg. each call to load() gets its own element)
+	 *			<ul>
+	 *				<li>["formData"] object An object of the form-data if any that was used in the case of
+	 *						a POST request.</li>
+	 *				<li>["name"] string A name of the page that will be shown in the history-viewer. Set via the
+	 *						"name"-element of the historyData-parameter of load().</li>
+	 *				<li>["parentIndex"] int May hold an index-integer pointing of another page in the pages-array,
+	 *						specifying it as a parent-request of this one. This will then be reflected in the tree-view
+	 *						of the history-viewer. This is set up using "id"&"parentId"-elements  of the
+	 *						historyData-parameter of load().</li>
+	 *				<li>["customData"] mixed Contains what was passed as the "customData"-element of the
+	 *						historyData-parameter of load() if anything.</li>
+	 *				<li>["exchanges"] array Array of request&response pairs. Usually this will only contain
+	 *					one element but more will be added for each failed request.
+	 *					<ul>
+	 *						<li>["error"] false|string Is false if no error, otherwise an explanation-string
+	 *							of the error.</li>
+	 *						<li>["content"] string The name of the file containing the content that the
+	 *								server responded with.</li>
+	 *						<li>["headers"] object ...and the headers.</li>
+	 *					</ul>
+	 *				</li>
+	 *			</ul>
+	 *		</li>
+	 *		<li>["customData"]</li>
+	 * </ul>
+	 * @param SplFileObject $historyDataFileObject The file-object of the "data.json"-file in $historyDirectory.
+	 * @param string[] $pageContents An indexed array of content-strings for this page. Contains 1 usually but more when
+	 *		requests fail.
+	 * @param array $pageObject A page object as in the "pages"-array described in the description of this method,
+	 *			minus the "content"-element of the elements in the "exchanges"-array. Each element of the
+	 *			"exchanges"-array corresponds to one content with the same index in the $pageContents-argument.
 	 * @param array $settings
-	 * @param array $historyData*/
-	private static function writeHistory($historyFileObject,$data,$settings,$historyData) {
-		if (!isset($historyFileObject)) {
-			$historyFileObject=new SplFileObject($settings['history'],'c+');
+	 * @param array $historyOptions*/
+	private static function writeHistory($historyDataFileObject,$pageContents,$pageObject,$settings,$historyOptions) {
+		
+		$historyDirectory=$settings['history'];
+		//$historyDataFileObject->rewind();
+		
+		$startTime=microtime(true);
+		//$historyData=json_decode($historyDataFileObject->fread($historyDataFileObject->fstat()['size']),true);
+					
+		$numExchanges=count($pageContents);
+		for ($i=0; $i<$numExchanges; ++$i) {
+			if (isset($historyOptions['name'])) {
+				$wantedFileName=preg_replace("([^\w\s\d\-_~,;:\[\]\(\)])", '', $historyOptions['name']);
+			} else {
+				$wantedFileName=time();
+			}
+			if ($numExchanges>1)
+				$wantedFileName.="_$i";
+			$fileName=$wantedFileName;
+			for ($j=0; file_exists($historyDirectory.$fileName); ++$j) {       
+				$fileName=$wantedFileName."($j)";
+			}
+			file_put_contents("$historyDirectory/$fileName", $pageContents[$i]);
+			$pageObject['exchanges'][$i]['content']=$fileName;
 		}
-		$historyFileObject->flock(LOCK_EX);
-		//check if the historyFile is empty. we don't have to check for file-existence because it will always
-		//have been created by now byt simply creating the SplFileObject
-		if (!$historyFileObject->fstat()['size']) {
-			$dataPrefix='{"pages":[';
-			$historyFileTempData=['numPages'=>0,'idIndices'=>[]];
-		} else {
-			$dataPrefix=',';
-			$tempDataSize=Hicurl::seekHistoryFileTempData($historyFileObject);
-			$historyFileTempData=json_decode($historyFileObject->fread($tempDataSize),true);
-			$historyFileObject->fseek(-4-$tempDataSize, SEEK_END);
-		}
-		if (isset($historyData['id'])) {
-			$historyFileTempData['idIndices'][$historyData['id']]=$historyFileTempData['numPages'];
-		}
-		if (isset($historyData['parentId'])) {
-			$data['parentIndex']=$historyFileTempData['idIndices'][$historyData['parentId']];
-		}
-		++$historyFileTempData['numPages'];
-		$historyFileObject->fwrite($dataPrefix.json_encode($data));
-		$tempDataSize=$historyFileObject->fwrite(json_encode($historyFileTempData));
-		$historyFileObject->fwrite(pack('N',$tempDataSize));
-		$historyFileObject->flock(LOCK_UN);
+		//$historyData['pages'][]=$pageObject;
+		//$historyDataFileObject->rewind();
+		//$historyDataFileObject->fwrite(json_encode($historyData));
+		
+		echo PHP_EOL."Time taken for writeHistory:".(microtime(true)-$startTime);
+		$historyDataFileObject->flock(LOCK_EX);
+		$historyDataFileObject->fseek(-2, SEEK_END);
+		$historyDataFileObject->fwrite(json_encode($pageObject));
+		$historyDataFileObject->flock(LOCK_UN);
 	}
 	
 	/**
@@ -240,7 +283,10 @@ class Hicurl {
 	 * This method has a instance counterpart of the name loadSingle which works just the same.
 	 * @see loadSingle()*/
 	public static function loadSingleStatic($url,$formdata=null,$settings=[],$history=[]) {
-		return Hicurl::loadSingleReal(curl_init(),null,$url,$formdata,
+		$historyFileObject=null;
+		if (isset($settings['history']))
+				$historyFileObject=Hicurl::setupHistoryFolder($settings['history']);
+		return Hicurl::loadSingleReal(curl_init(),$historyFileObject,$url,$formdata,
 				($settings?$settings:[])+Hicurl::$defaultSettings,$history);
 	}
 	
@@ -265,6 +311,7 @@ class Hicurl {
 			];
 			if ($history)//add customData and name of the $history-parameter to $historyPage
 				$historyPage+=array_intersect_key($history,array_flip(['customData','name']));
+			$contents=[];
 		}
 		do {
 			if (++$numRetries) {
@@ -286,20 +333,20 @@ class Hicurl {
 			$error=Hicurl::parseAndValidateResult($content,$headers,$settings,$output);
 			if (isset($historyPage)) {//are we writing history-data? this var is only set if we are
 				$historyPage['exchanges'][]=[
-					'content'=>$content,
 					'headers'=>$headers,
 					'error'=>$error,
-					'errorCode'=>0
 				];
+				$contents[]=$content;
 			}
 		} while ($error);//keep looping until $error is false
 		if (isset($historyPage)) {//should we write history?
-			Hicurl::writeHistory($historyFileObject, $historyPage, $settings, $history);
+			Hicurl::writeHistory($historyFileObject, $contents,$historyPage, $settings, $history);
 		}
 		return $output+=[
 			'content'=>($settings['jsonResponse']??null)?json_decode($content,true):$content,
 			'headers'=>$headers,
-			'error'=>false//(this wont overwrite an error-description if it has been written already)
+			'error'=>false,//(this wont overwrite an error-description if it has been written already)
+			'errorCode'=>0
 		];
 	}
 	
@@ -495,14 +542,25 @@ class Hicurl {
 			$curlOptions[CURLOPT_PROXY]='127.0.0.1:9050';
 			$curlOptions[CURLOPT_PROXYTYPE]=CURLPROXY_SOCKS5;
 		}
+		$postHeaders=$settings['postHeaders']??[];
 		if (isset($formdata)) {
 			$curlOptions[CURLOPT_POST]=true;
-			foreach ($formdata as $key => $value) {
-				$params[] = $key . '=' . urlencode($value);
+			if ($settings['jsonPayload']??null) {
+				$jsonData=json_encode($formdata);
+				$curlOptions[CURLOPT_POSTFIELDS]=$jsonData;
+				$postHeaders=['Content-Type'=>'application/json','Content-Length'=>strlen($jsonData)]+$postHeaders;
+			} else {
+				foreach ($formdata as $key => $value) {
+					$params[] = $key . '=' . urlencode($value);
+				}
+				$curlOptions[CURLOPT_POSTFIELDS]=implode('&', $params);
 			}
-			$curlOptions[CURLOPT_POSTFIELDS]=implode('&', $params);
-			if (!empty($settings['postHeaders'])) {
-				$curlOptions[CURLOPT_HTTPHEADER]=$settings['postHeaders'];//10023
+			if (!empty($postHeaders)) {
+				foreach ($postHeaders as $headerKey=>$headerValue) {
+					$postHeaders[]="$headerKey:$headerValue";
+					unset ($postHeaders[$headerKey]);
+				}
+				$curlOptions[CURLOPT_HTTPHEADER]=$postHeaders;//10023
 			}
 		} else if (!empty($settings['getHeaders'])) {
 			$curlOptions[CURLOPT_HTTPHEADER]=$settings['getHeaders'];//10023
