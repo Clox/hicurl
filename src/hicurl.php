@@ -83,6 +83,9 @@ class Hicurl {
 	 *		</li>
 	 *		<li>'jsonPayload' bool If this is set to true then the form-data will be sent as json, as a "payload"
 	 *		</li>
+	 *		<li>'jsonResponse' bool Set to true if json is expected as response in which case it will be parsed to
+	 *								an associtiave array automatically.
+	 *		</li>
 	 *		<li>'tor' bool If true then a proxy on port 9050 will be used for the requsts.</li>
 	 *	</ul>
 	 * @return array The resulted settings*/
@@ -321,7 +324,7 @@ class Hicurl {
 			Hicurl::writeHistory($historyFileObject, $contents,$historyPage, $settings, $history);
 		}
 		return $output+=[
-			'content'=>$content,
+			'content'=>($settings['jsonResponse']??null)?json_decode($content,true):$content,
 			'headers'=>$headers,
 			'error'=>false,//(this wont overwrite an error-description if it has been written already)
 			'errorCode'=>0
