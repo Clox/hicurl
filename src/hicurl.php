@@ -563,7 +563,12 @@ class Hicurl {
 				$curlOptions[CURLOPT_HTTPHEADER]=$postHeaders;//10023
 			}
 		} else if (!empty($settings['getHeaders'])) {
-			$curlOptions[CURLOPT_HTTPHEADER]=$settings['getHeaders'];//10023
+			$getHeaders=$settings['getHeaders'];
+			foreach ($getHeaders as $headerKey=>$headerValue) {
+					$getHeaders[]="$headerKey:$headerValue";
+					unset ($getHeaders[$headerKey]);
+				}
+			$curlOptions[CURLOPT_HTTPHEADER]=$getHeaders;//10023
 		}
 		//By resetting the settings like this it suffices to write settings to $curlOptions depending on what is
 		//*set* in $settings. We don't have to negate effects of settings that are *not set* in $setting
