@@ -322,8 +322,17 @@ class Hicurl {
 				}
 				sleep($settings['fruitlessPassDelay']);
 			}
+			
 			$content=curl_exec($curlHandler);//do the actual request. assign response-content to $content
 			$headers=curl_getinfo($curlHandler);//get the headers too
+			//$content= utf8_decode($content);//decode the content. The following should do the same....
+			preg_match('/charset=([^;]+)/', $headers['content_type'],$contentTypeMatch);//first get the encoding
+			if (isset($contentTypeMatch[1])) {
+				//$content=iconv($contentTypeMatch[1], 'ISO-8859-1', $content);//then do this
+				$content=$iso88591_2 = mb_convert_encoding($content, 'ISO-8859-1', $contentTypeMatch[1]);//OR this
+			}
+			
+			
 			if ($headers['http_code']==0&&!empty($settings['tor'])) {
 				$output['errorCode']=1;
 				$output['error']="Unable to connect via tor-proxy.\nIs Tor installed and configured correctly?";
