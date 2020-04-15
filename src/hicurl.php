@@ -325,12 +325,14 @@ class Hicurl {
 			
 			$content=curl_exec($curlHandler);//do the actual request. assign response-content to $content
 			$headers=curl_getinfo($curlHandler);//get the headers too
-			//$content= utf8_decode($content);//decode the content. The following should do the same....
-			preg_match('/charset=([^;]+)/', $headers['content_type'],$contentTypeMatch);//first get the encoding
-			if (isset($contentTypeMatch[1])) {
-				//$content=iconv($contentTypeMatch[1], 'ISO-8859-1', $content);//then do this
-				$content=$iso88591_2 = mb_convert_encoding($content, 'ISO-8859-1', $contentTypeMatch[1]);//OR this
-			}
+			$content= utf8_decode($content);//Not sure if this ever ruins any data by blindly decoding?
+			//If it does then the following could be used conditionally?
+			//preg_match('/charset=([^;]+)/', $headers['content_type'],$contentTypeMatch);//first get the encoding
+			//if (isset($contentTypeMatch[1])) {
+			//	$content=iconv($contentTypeMatch[1], 'ISO-8859-1', $content);//then do this
+			//	$content=$iso88591_2 = mb_convert_encoding($content, 'ISO-8859-1', $contentTypeMatch[1]);//OR this
+			//	$content= utf8_decode($content);//OR even this?
+			//}
 			
 			
 			if ($headers['http_code']==0&&!empty($settings['tor'])) {
@@ -545,6 +547,11 @@ class Hicurl {
 			//CURLOPT_PROXY=>'127.0.0.1:8888'
 		];
 		if (!empty($settings['cookie'])) {
+			if (file_exists($settings['cookie'])) {
+				if (!is_writable($settings['cookie']))
+					trigger_error ("Hicurl: The specified cookie-file ($settings[cookie]) is not writeable.");
+			} else if (!is_writable(dirname($settings['cookie'])))
+				trigger_error ("Hicurl: Can't create cookie-file because the directory is not writeable.");
 			$curlOptions[CURLOPT_COOKIEFILE]=$curlOptions[CURLOPT_COOKIEJAR]=$settings['cookie'];
 		}
 		if (!empty($settings['tor'])) {
