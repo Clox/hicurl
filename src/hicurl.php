@@ -553,6 +553,12 @@ class Hicurl {
 					trigger_error ("Hicurl: The specified cookie-file ($settings[cookie]) is not writeable.");
 			} else if (!is_writable(dirname($settings['cookie'])))
 				trigger_error ("Hicurl: Can't create cookie-file because the directory is not writeable.");
+			else {
+				//if file doesn't exists then create and sen permission so everyone can read&write it.
+				//this simplifies things when running the code as different users, e.g. testing through both cli and web
+				touch ($settings['cookie']);
+				chmod($settings['cookie'], 0757);
+			}
 			$curlOptions[CURLOPT_COOKIEFILE]=$curlOptions[CURLOPT_COOKIEJAR]=$settings['cookie'];
 		}
 		if (!empty($settings['tor'])) {
