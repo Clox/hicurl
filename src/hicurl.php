@@ -281,6 +281,35 @@ class Hicurl {
 				($settings?$settings:[])+Hicurl::$defaultSettings,$history);
 	}
 	
+	public static function loadMultiStatic($urls,$formDatas=null,$settings=[],$history=[]) {
+		$numUrls=is_string($urls)?:count($urls);
+		$numFormDatas=isset($formDatas[0])?count($formDatas):1;
+		$numSettings=array_key_exists(0, $settings)?count($settings):1;
+		$numRequest=max($numUrls,$numFormDatas,$numSettings);
+		$curlHandlers=[];
+		$curlMultiHandler = curl_multi_init();
+		for ($i=0; $i<$numRequest; $i++) {
+			$curlHandlers[$i]=curl_init();
+			$url=$numUrls>1?$urls[$i]:$urls;
+			$formData=$numFormDatas>1?$formDatas[$i]:$formDatas;
+			$setting=$numSettings>1?$settings[$i]:$settings;
+			self::setCurlOptions($curlHandlers[$i],$url,$formData,$setting);
+			curl_multi_add_handle($curlMultiHandler,$curlHandlers[$i]);
+		}
+		$running = null;
+		do {
+		  curl_multi_exec($curlMultiHandler, $running);
+		  curl_multi_select($curlMultiHandler);
+		} while ($running);
+		for ($i=0; $i<$numRequest; $i++) {
+			$result[$i]=["content"=>curl_multi_getcontent($curlHandlers[$i]),
+						'headers'=>curl_getinfo($curlHandlers[$i])];
+			curl_multi_remove_handle($curlMultiHandler, $curlHandlers[$i]);
+		}
+		curl_multi_close($curlMultiHandler);
+		return $result;
+	}
+	
 	/**
 	 * The method which both loadSingle and loadSingleStatic calls, and which is the "real" loading-function
 	 * @param resource $curlHandler
@@ -292,6 +321,7 @@ class Hicurl {
 	 * @return array ['content' string,'headers' array,'error' string|null,'errorCode']*/
 	private static function loadSingleReal($curlHandler,$historyFileObject,$url,$formdata,$settings,$history=null) {
 		$numRetries=-1;
+		
 		Hicurl::setCurlOptions($curlHandler,$url, $formdata,$settings);
 		$output=[];//this is the array that will be returned
 		if ($historyFileObject||!empty($settings['history'])) {//should we write history?
@@ -313,26 +343,15 @@ class Hicurl {
 				}
 				sleep($settings['fruitlessPassDelay']);
 			}
-			
 			$content=curl_exec($curlHandler);//do the actual request. assign response-content to $content
 			$headers=curl_getinfo($curlHandler);//get the headers too
-			$content= utf8_decode($content);//Not sure if this ever ruins any data by blindly decoding?
-			//If it does then the following could be used conditionally?
-			//preg_match('/charset=([^;]+)/', $headers['content_type'],$contentTypeMatch);//first get the encoding
-			//if (isset($contentTypeMatch[1])) {
-			//	$content=iconv($contentTypeMatch[1], 'ISO-8859-1', $content);//then do this
-			//	$content=$iso88591_2 = mb_convert_encoding($content, 'ISO-8859-1', $contentTypeMatch[1]);//OR this
-			//	$content= utf8_decode($content);//OR even this?
-			//}
-			
-			
 			if ($headers['http_code']==0&&!empty($settings['tor'])) {
 				$output['errorCode']=1;
 				$output['error']="Unable to connect via tor-proxy.\nIs Tor installed and configured correctly?";
 				$content=$headers=null;
 				break;
 			}
-			$error=Hicurl::parseAndValidateResult($content,$headers,$settings,$output);
+			$validationSuccess=Hicurl::parseAndValidateResult($content,$headers,$settings,$output,$error);
 			if (isset($historyPage)) {//are we writing history-data? this var is only set if we are
 				$historyPage['exchanges'][]=[
 					'headers'=>$headers,
@@ -340,7 +359,7 @@ class Hicurl {
 				];
 				$contents[]=$content;
 			}
-		} while ($error);//keep looping until $error is false
+		} while (!$validationSuccess);
 		if (isset($historyPage)) {//should we write history?
 			Hicurl::writeHistory($historyFileObject, $contents,$historyPage, $settings, $history);
 		}
@@ -360,28 +379,26 @@ class Hicurl {
 	 * @param array $settings The current state of settings.
 	 * @param &DOMXPath $domXpath The DOMXPath-object will be set to this out argument if settings->xpath is set.
 	 * @return bool|string Returns false if no error was encountered, otherwise a string describing the error.*/
-	private static function parseAndValidateResult(&$content,$headers, $settings,&$outputArray) {
+	private static function parseAndValidateResult(&$content,$headers, $settings,&$outputArray_out,&$error_out) {
+		$error_out=null;
 		if (ord($content[0])==0x1f && ord($content[1])==0x8b) {
 			$content=gzdecode($content);
 		}
 		//utf8 is needed to json-decode correctly
 		//can't blindly utf8-encode or data will be corrupted if it already was utf8 encoded.
-		if (strpos($headers['content_type'],'utf-8')===false) {
+		if (strpos(strtolower($headers['content_type']),'utf-8')===false) {
 			$content=utf8_encode($content);
 		}
-		if ($headers['http_code']==404) {
-			return 'HTTP code 404';
-		}
-		if ($settings['retryOnNull']&&$content===null) {
-			return 'Null content';
-		}
-		if ($settings['retryOnIncompleteHTML']&&!preg_match("/<\/html>\s*$/",$content)) {	
-			return 'Cut off HTML';
-		}
-		if (!empty($settings['xpath'])) {
-			return Hicurl::xPathEvaluate($settings['xpath'],$content,$outputArray);
-		}
-		return false;
+		if ($headers['http_code']==404)
+			$error_out='HTTP code 404';
+		else if ($settings['retryOnNull']&&$content===null)
+			$error_out='Null content';
+		else if ($settings['retryOnIncompleteHTML']&&
+		strpos(strtolower($headers['content_type']),'html')!==false&&!preg_match("/<\/html>\s*$/",$content))
+			$error_out='Cut off HTML';
+		else if (!empty($settings['xpath']))
+			Hicurl::xPathEvaluate($settings['xpath'],$content,$outputArray_out,$error_out);
+		return !$error_out;
 	}
 	
 	/**
@@ -394,7 +411,7 @@ class Hicurl {
 	 *		generated twice if any xpath work is to be done on the content returned by the load-call.
 	 * @return false|string $outputArray Returns error string on failure, e.g. if not all xpaths evaluate to true.
 	 * Otherwise it returns false for no error.*/
-	private static function xPathEvaluate($xpath,$pageContent,&$outputArray) {
+	private static function xPathEvaluate($xpath,$pageContent,&$outputArray,&$error) {
 		$domDocument=new DOMDocument();
 		//Slap on this meta-tag which sets encoding to utf-8. Otherwise utf8 content gets corrupted. This doesn't seem
 		//to ever do any damage to pages that are not utf8 encoded or already have this tag...
@@ -407,10 +424,10 @@ class Hicurl {
 			foreach ($xpath as $expression) {
 				$xpathResult=$domXpath->evaluate($expression);
 				if ($xpathResult===false||($xpathResult instanceof \DOMNodeList &&$xpathResult->length==0))
-					return "Xpath failure\nThe following xpath failed:'$expression'";
+					$error="Xpath failure\nThe following xpath failed:'$expression'";
 			}
 		}
-		return false;
+		return !$error;
 	}
 	
 	/**
@@ -535,19 +552,11 @@ class Hicurl {
 	 * @param array $settings Current settings
 	 * @return void*/
 	private static function setCurlOptions($curlHandler,$url,$formdata,$settings) {
-		$curlOptions=[
-			CURLOPT_URL => $url,
-			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_FOLLOWLOCATION => true,
-			CURLOPT_SSL_VERIFYPEER => false,
-			CURLINFO_HEADER_OUT => true,
-			//CURLOPT_VERBOSE=>true,
-			//CURLOPT_PROXY=>'127.0.0.1:8888'
-		];
+		$curlOptions=[	CURLOPT_URL => $url,CURLOPT_RETURNTRANSFER => true,CURLOPT_FOLLOWLOCATION => true,
+						CURLOPT_SSL_VERIFYPEER => false,CURLINFO_HEADER_OUT => true,];
 		if (!empty($settings['cookie'])) {
-			if (!self::path_is_absolute($settings['cookie'])) {
+			if (!self::path_is_absolute($settings['cookie']))
 				trigger_error("Hicurl: The path for the cookie can't be relative, it must be absolute.");
-			}
 			if (file_exists($settings['cookie'])) {
 				if (!is_writable($settings['cookie']))
 					trigger_error ("Hicurl: The specified cookie-file ($settings[cookie]) is not writeable.");
