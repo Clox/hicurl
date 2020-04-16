@@ -75,16 +75,11 @@ class Hicurl {
 	 *		</li>
 	 *		<li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
 	 *		<li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
-<<<<<<< HEAD
-<<<<<<< Updated upstream
 	 *		<li>'history' string
 	 *			Enables saving contents/headers of request&responses in a file for later viewing. The value should be a
 	 *			path to a history-file. If it doesn't yet exist it will be created, else it will be appended to.
 	 *			For on the structure of history-files {@see writeHistory()}</li>
 	 *		<li>'tor' bool If true then a proxy on port 9050 willbe used for the requsts.</li>
-=======
-=======
->>>>>>> json
 	 *		<li>'history' string Path to a directory of where to save history to.<br>
 	 *			Setting this option enables history-saving. All contents of requested pages along with
 	 *			request/response-headers willbe saved to this directory. If the specified folder doesn't exist then it
@@ -93,19 +88,15 @@ class Hicurl {
 	 *		</li>
 	 *		<li>'jsonPayload' bool If this is set to true then the form-data will be sent as json, as a "payload"
 	 *		</li>
-<<<<<<< HEAD
 	 * 		<li>'jsonResponse' bool Set this to true if a json-response is expected in which case it will be parsed
 	 *								to an associtiave array automatically.
 	 *		</li>
 	 * 
 	 *		<li>'tor' bool If true then a proxy on port 9050 will be used for the requsts.</li>
->>>>>>> Stashed changes
-=======
 	 *		<li>'jsonResponse' bool Set to true if json is expected as response in which case it will be parsed to
 	 *								an associtiave array automatically.
 	 *		</li>
 	 *		<li>'tor' bool If true then a proxy on port 9050 will be used for the requsts.</li>
->>>>>>> json
 	 *	</ul>
 	 * @return array The resulted settings*/
 	public function settings($settings=null) {
@@ -528,12 +519,19 @@ class Hicurl {
 		ini_set('memory_limit', $memoryLimit);//revert back to old
 		return true;
 	}
-	
+	private static function path_is_absolute( $path ) {
+		// Windows allows absolute paths like this.
+		if ( preg_match( '#^[a-zA-Z]:\\\\#', $path ) ) {
+			return true;
+		}
+		// A path starting with / or \ is absolute; anything else is relative.
+		return ( '/' === $path[0] || '\\' === $path[0] );
+	}
 	/**
 	 * Generates the options that are used for the curl object and sets them to the curl-handler.
 	 * @param resource $curlHandler The curl-handler that the options should be set to
 	 * @param string $url The url for the request
-	 * @param array|null $formdata If post-request then this should be an associative array of the formdata.
+ * @param array|null $formdata If post-request then this should be an associative array of the formdata.
 	 * @param array $settings Current settings
 	 * @return void*/
 	private static function setCurlOptions($curlHandler,$url,$formdata,$settings) {
@@ -547,6 +545,9 @@ class Hicurl {
 			//CURLOPT_PROXY=>'127.0.0.1:8888'
 		];
 		if (!empty($settings['cookie'])) {
+			if (!self::path_is_absolute($settings['cookie'])) {
+				trigger_error("Hicurl: The path for the cookie can't be relative, it must be absolute.");
+			}
 			if (file_exists($settings['cookie'])) {
 				if (!is_writable($settings['cookie']))
 					trigger_error ("Hicurl: The specified cookie-file ($settings[cookie]) is not writeable.");
