@@ -75,15 +75,11 @@ class Hicurl {
 	 *		</li>
 	 *		<li>'postHeaders' array An array of headers that will be sent on POST-requests.</li>
 	 *		<li>'getHeaders' array An array of headers that will be sent on GET-requests</li>
-	 *		<li>'history' string
-	 *			Enables saving contents/headers of request&responses in a file for later viewing. The value should be a
-	 *			path to a history-file. If it doesn't yet exist it will be created, else it will be appended to.
-	 *			For on the structure of history-files {@see writeHistory()}</li>
 	 *		<li>'tor' bool If true then a proxy on port 9050 willbe used for the requsts.</li>
 	 *		<li>'history' string Path to a directory of where to save history to.<br>
 	 *			Setting this option enables history-saving. All contents of requested pages along with
-	 *			request/response-headers willbe saved to this directory. If the specified folder doesn't exist then it
-	 *			will automatically be created(recusively). When done with the directory it should be compiled into a
+	 *			request/response-headers will be saved to this directory. If the specified folder doesn't exist then it
+	 *			will automatically be created(recursively). When done with the directory it should be compiled into a
 	 *			single file using {@see compile()}.
 	 *		</li>
 	 *		<li>'jsonPayload' bool If this is set to true then the form-data will be sent as json, as a "payload"
@@ -127,10 +123,15 @@ class Hicurl {
 		$historyDataFileObject=new SplFileObject($historyPath."/data.json",'c+');
 		$historyDataFileObject->flock(LOCK_EX);
 		if ($historyDataFileObject->fstat()['size']==0) {
-			$historyDataFileObject->fwrite('{"pages":[]}');
-		}
+			$historyDataFileObject->fwrite("{\"pages\":[\n]}");
+			$historyDataFileObject->historyFileIsEmpty=true;
+		} else
+			$historyDataFileObject->historyFileIsEmpty=false;
+		
 		$historyDataFileObject->flock(LOCK_UN);
+		return $historyDataFileObject;
 	}
+	
 	/**
 	 * Writes history to a history-directory. Each page-content gets its own file, and there's also a json-file of the
 	 * name "data.json" that is shared among all requests.
@@ -177,20 +178,19 @@ class Hicurl {
 		
 		$startTime=microtime(true);
 		//$historyData=json_decode($historyDataFileObject->fread($historyDataFileObject->fstat()['size']),true);
-					
 		$numExchanges=count($pageContents);
+		if (isset($historyOptions['name'])) {
+				$fileName=preg_replace("([^\w\s\d\-_~,;:\[\]\(\)])", '', $historyOptions['name']);
+		} else {
+			$fileName=time();
+		}
+		if (file_exists("$historyDirectory/$fileName")) {
+			for ($i=1; file_exists("$historyDirectory/$fileName($i)"); $i++);
+			$fileName.="($i)";
+		}
 		for ($i=0; $i<$numExchanges; ++$i) {
-			if (isset($historyOptions['name'])) {
-				$wantedFileName=preg_replace("([^\w\s\d\-_~,;:\[\]\(\)])", '', $historyOptions['name']);
-			} else {
-				$wantedFileName=time();
-			}
-			if ($numExchanges>1)
-				$wantedFileName.="_$i";
-			$fileName=$wantedFileName;
-			for ($j=0; file_exists($historyDirectory.$fileName); ++$j) {       
-				$fileName=$wantedFileName."($j)";
-			}
+			if ($i)
+				$fileName.="_$i";
 			file_put_contents("$historyDirectory/$fileName", $pageContents[$i]);
 			$pageObject['exchanges'][$i]['content']=$fileName;
 		}
@@ -198,11 +198,13 @@ class Hicurl {
 		//$historyDataFileObject->rewind();
 		//$historyDataFileObject->fwrite(json_encode($historyData));
 		
-		echo PHP_EOL."Time taken for writeHistory:".(microtime(true)-$startTime);
 		$historyDataFileObject->flock(LOCK_EX);
-		$historyDataFileObject->fseek(-2, SEEK_END);
-		$historyDataFileObject->fwrite(json_encode($pageObject));
+		$historyDataFileObject->fseek(-3, SEEK_END);
+		$size=$historyDataFileObject->getSize();
+		$isEmpty=$historyDataFileObject->historyFileIsEmpty;
+		$historyDataFileObject->fwrite(($isEmpty?"":",")."\n\t".json_encode($pageObject)."\n]}");
 		$historyDataFileObject->flock(LOCK_UN);
+		$historyDataFileObject->historyFileIsEmpty=false;
 	}
 	
 	/**
@@ -257,14 +259,10 @@ class Hicurl {
 	public function loadSingle($url,$formdata=null,$settings=[],$history=[]) {
 		//We want to pass the historyFileObject of this instance to loadSingleReal if it has one, given it doesn't
 		//(temporarily) get overwritten by the history-item in the $settings-argument of this function.
-		$historyFileObject=null;//if the next condition fails then null will be passed as history-argument
-		if ($this->historyFileObject//if the instance has a historyFileObject and there's no history-item in the
-		//$settings-argument, or if there is and its setting is the same as the one in settings of the instance
-			&&(!array_key_exists('history', $settings) || $settings['history']==$this->settingsData['history'])) {
-			$historyFileObject=$this->historyFileObject;//...then the instance fileObject will be used
-		}
+		if (!empty($settings))
+			$this->settings($settings+$this->settingsData);
 			
-		return Hicurl::loadSingleReal($this->curlHandler,$historyFileObject, $url, $formdata,
+		return Hicurl::loadSingleReal($this->curlHandler,$this->historyFileObject, $url, $formdata,
 				($settings?$settings:[])+$this->settingsData,$history);
 	}
 	
