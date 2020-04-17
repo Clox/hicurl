@@ -282,17 +282,26 @@ class Hicurl {
 	}
 	
 	public static function loadMultiStatic($urls,$formDatas=null,$settings=[],$history=[]) {
-		$numUrls=is_string($urls)?:count($urls);
-		$numFormDatas=isset($formDatas[0])?count($formDatas):1;
-		$numSettings=array_key_exists(0, $settings)?count($settings):1;
-		$numRequest=max($numUrls,$numFormDatas,$numSettings);
+		$args=compact('urls','formDatas','settings');
+		foreach ($args as $param=>$arg) {
+			if (is_array($arg)&&($arg[0])) {
+				$lengths[$param]=count($arg);
+				if ($lengths[$param]==1)
+					$args[$param]=$arg[0];
+			} else
+				$lengths[$param]=1;
+		}
+		
+		
+		
+		$numRequest=max($lengths);
 		$curlHandlers=[];
 		$curlMultiHandler = curl_multi_init();
 		for ($i=0; $i<$numRequest; $i++) {
 			$curlHandlers[$i]=curl_init();
-			$url=$numUrls>1?$urls[$i]:$urls;
-			$formData=$numFormDatas>1?$formDatas[$i]:$formDatas;
-			$setting=$numSettings>1?$settings[$i]:$settings;
+			$url=$lengths['urls']>1?$args['urls'][$i]:$args['urls'];
+			$formData=$lengths['formDatas']>1?$args['formDatas'][$i]:$args['formDatas'];
+			$setting=$lengths['settings']>1?$args['settings'][$i]:$args['settings'];
 			self::setCurlOptions($curlHandlers[$i],$url,$formData,$setting);
 			curl_multi_add_handle($curlMultiHandler,$curlHandlers[$i]);
 		}
