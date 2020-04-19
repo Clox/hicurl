@@ -163,7 +163,7 @@ class Hicurl {
 	 *		</li>
 	 *		<li>["customData"]</li>
 	 * </ul>
-	 * @param SplFileObject $historyDataFileObject The file-object of the "data.json"-file in $historyDirectory.
+	 * @param SplFileObject $historyFileObj The file-object of the "data.json"-file in $historyDirectory.
 	 * @param string[] $pageContents An indexed array of content-strings for this page. Contains 1 usually but more when
 	 *		requests fail.
 	 * @param array $pageObject A page object as in the "pages"-array described in the description of this method,
@@ -171,14 +171,9 @@ class Hicurl {
 	 *			"exchanges"-array corresponds to one content with the same index in the $pageContents-argument.
 	 * @param array $settings
 	 * @param array $historyOptions*/
-	private static function writeHistory($historyDataFileObject,$pageContents,$pageObject,$settings,$historyOptions) {
-		
+	private static function writeHistory($historyFileObj,$pageContents,$formdata,$pageObject,$settings,$historyOptions){
 		$historyDirectory=$settings['history'];
-		//$historyDataFileObject->rewind();
-		
-		$startTime=microtime(true);
-		//$historyData=json_decode($historyDataFileObject->fread($historyDataFileObject->fstat()['size']),true);
-		$numExchanges=count($pageContents);
+		$numResponses=count($pageContents);
 		if (isset($historyOptions['name'])) {
 				$fileName=preg_replace("([^\w\s\d\-_~,;:\[\]\(\)])", '', $historyOptions['name']);
 		} else {
@@ -188,7 +183,7 @@ class Hicurl {
 			for ($i=1; file_exists("$historyDirectory/$fileName($i)"); $i++);
 			$fileName.="($i)";
 		}
-		for ($i=0; $i<$numExchanges; ++$i) {
+		for ($i=0; $i<$numResponses; ++$i) {
 			if ($i)
 				$fileName.="_$i";
 			file_put_contents("$historyDirectory/$fileName", $pageContents[$i]);
@@ -198,13 +193,13 @@ class Hicurl {
 		//$historyDataFileObject->rewind();
 		//$historyDataFileObject->fwrite(json_encode($historyData));
 		
-		$historyDataFileObject->flock(LOCK_EX);
-		$historyDataFileObject->fseek(-3, SEEK_END);
-		$size=$historyDataFileObject->getSize();
-		$isEmpty=$historyDataFileObject->historyFileIsEmpty;
-		$historyDataFileObject->fwrite(($isEmpty?"":",")."\n\t".json_encode($pageObject)."\n]}");
-		$historyDataFileObject->flock(LOCK_UN);
-		$historyDataFileObject->historyFileIsEmpty=false;
+		$historyFileObj->flock(LOCK_EX);
+		$historyFileObj->fseek(-3, SEEK_END);
+		$size=$historyFileObj->getSize();
+		$isEmpty=$historyFileObj->historyFileIsEmpty;
+		$historyFileObj->fwrite(($isEmpty?"":",")."\n\t".json_encode($pageObject)."\n]}");
+		$historyFileObj->flock(LOCK_UN);
+		$historyFileObj->historyFileIsEmpty=false;
 	}
 	
 	/**
@@ -368,7 +363,7 @@ class Hicurl {
 			}
 		} while (!$validationSuccess);
 		if (isset($historyPage)) {//should we write history?
-			Hicurl::writeHistory($historyFileObject, $contents,$historyPage, $settings, $history);
+			Hicurl::writeHistory($historyFileObject,$contents,$formdata,$historyPage,$settings, $history);
 		}
 		return $output+=[
 			'content'=>($settings['jsonResponse']??null)?json_decode($content,true):$content,
