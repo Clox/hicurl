@@ -119,8 +119,10 @@ class Hicurl {
 					. "folder which may or may not exist.", E_USER_ERROR);
 			}
 			mkdir($historyPath, 0777, true);
+			touch($historyPath."/data.json");
+			chmod($historyPath."/data.json", 0757);
 		}
-		$historyDataFileObject=new SplFileObject($historyPath."/data.json",'c+');
+		$historyDataFileObject=new SplFileObject($historyPath."/data.json",'r+');
 		$historyDataFileObject->flock(LOCK_EX);
 		if ($historyDataFileObject->fstat()['size']==0) {
 			$historyDataFileObject->fwrite("{\"pages\":[\n]}");
@@ -565,7 +567,7 @@ class Hicurl {
 			} else if (!is_writable(dirname($settings['cookie'])))
 				trigger_error ("Hicurl: Can't create cookie-file because the directory is not writeable.");
 			else {
-				//if file doesn't exists then create and sen permission so everyone can read&write it.
+				//if file doesn't exists then create and set permission so everyone can read&write it.
 				//this simplifies things when running the code as different users, e.g. testing through both cli and web
 				touch ($settings['cookie']);
 				chmod($settings['cookie'], 0757);
