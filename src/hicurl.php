@@ -417,9 +417,20 @@ class Hicurl {
 	 * Otherwise it returns false for no error.*/
 	private static function xPathEvaluate($xpath,$pageContent,&$outputArray,&$error) {
 		$domDocument=new DOMDocument();
+		
+		//remedy of this error: DOMDocument::loadHTML(): htmlParseEntityRef: expecting ';' in Entity
+		//see stackoverflow.com/questions/1685277/warning-domdocumentloadhtml-htmlparseentityref-expecting-in-entity
+		// set error level
+		$internalErrors = libxml_use_internal_errors(true);
+
 		//Slap on this meta-tag which sets encoding to utf-8. Otherwise utf8 content gets corrupted. This doesn't seem
 		//to ever do any damage to pages that are not utf8 encoded or already have this tag...
 		$domDocument->loadHTML('<meta http-equiv="content-type" content="text/html; charset=utf-8">'.$pageContent);
+		
+		// Restore error level
+		libxml_use_internal_errors($internalErrors);
+
+		
 		$domXpath=$outputArray['domXPath']=new DOMXPath($domDocument);
 		//if it's set to true then we do not do any validation, but instead just assign domXpath to return-object.
 		if ($xpath!==true) {
