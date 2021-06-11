@@ -103,7 +103,7 @@ class Hicurl {
 					$this->historyFileObject=null;//then close old connection
 
 					//else if it is non null/false and that it isn't equal to what's already set
-				} else if (!isset($this->historyFileObject)||$historyPath!=$this->$historyPath) {
+				} else if (!isset($this->historyFileObject)||$historyPath!=$this->settingsData['history']) {
 					$this->historyFileObject=Hicurl::setupHistoryFolder($historyPath);
 				}
 			}
