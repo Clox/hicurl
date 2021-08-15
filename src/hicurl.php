@@ -222,7 +222,7 @@ class Hicurl {
 	 * @param string $url A URL-string to load
 	 * @param array|null $formdata If this is null then the request is sent as GET. Otherwise it is sent as POST using
 	 *		this array as formdata where key=name and value=value. It may be an empty array in which case the request
-	 *		will stil be sent as POST butwith no formdata.
+	 *		will still be sent as POST but with no formdata.
 	 * @param array $settings Optional parameter of settings that will be merged with the settings of the instance for
 	 *		the duration of this call only. See Hicurl->settings() for explenation on the settings. The settings that
 	 *		may be passed to that function are identical to those that may be passed to this.
@@ -385,12 +385,12 @@ class Hicurl {
 	 * @return bool|string Returns false if no error was encountered, otherwise a string describing the error.*/
 	private static function parseAndValidateResult(&$content,$headers, $settings,&$outputArray_out,&$error_out) {
 		$error_out=null;
-		if (ord($content[0])==0x1f && ord($content[1])==0x8b) {
+		if (!empty($content)&&ord($content[0])==0x1f && ord($content[1])==0x8b) {
 			$content=gzdecode($content);
 		}
 		//utf8 is needed to json-decode correctly
 		//can't blindly utf8-encode or data will be corrupted if it already was utf8 encoded.
-		if (strpos(strtolower($headers['content_type']),'utf-8')===false) {
+		if ($settings['jsonResponse']&&strpos(strtolower($headers['content_type']),'utf-8')===false) {
 			$content=utf8_encode($content);
 		}
 		if ($headers['http_code']==404)
