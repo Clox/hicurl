@@ -390,7 +390,7 @@ class Hicurl {
 		}
 		//utf8 is needed to json-decode correctly
 		//can't blindly utf8-encode or data will be corrupted if it already was utf8 encoded.
-		if ($settings['jsonResponse']&&strpos(strtolower($headers['content_type']),'utf-8')===false) {
+		if (($settings['jsonResponse']??null)&&strpos(strtolower($headers['content_type']),'utf-8')===false) {
 			$content=utf8_encode($content);
 		}
 		if ($headers['http_code']==404)
