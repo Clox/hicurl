@@ -590,32 +590,70 @@ class Hicurl {
 			$curlOptions[CURLOPT_PROXYTYPE]=CURLPROXY_SOCKS5;
 		}
 		$postHeaders=$settings['postHeaders']??[];
-		if (isset($formdata)) {
-			$curlOptions[CURLOPT_POST]=true;
-			if ($settings['jsonPayload']??null) {
-				$jsonData=json_encode($formdata);
-				$curlOptions[CURLOPT_POSTFIELDS]=$jsonData;
-				$postHeaders=['Content-Type'=>'application/json','Content-Length'=>strlen($jsonData)]+$postHeaders;
-			} else {
-				foreach ($formdata as $key => $value) {
-					$params[] = $key . '=' . urlencode($value);
+		if (isset($settings['method'])) {
+			$method=strtoupper($settings['method']);
+			$hasBody=isset($formdata);
+			if ($hasBody) {
+				if ($settings['jsonPayload']??null) {
+					$jsonData=json_encode($formdata);
+					$curlOptions[CURLOPT_POSTFIELDS]=$jsonData;
+					$postHeaders=['Content-Type'=>'application/json','Content-Length'=>strlen($jsonData)]+$postHeaders;
+				} else {
+					foreach ($formdata as $key => $value) {
+						$params[] = $key . '=' . urlencode($value);
+					}
+					$curlOptions[CURLOPT_POSTFIELDS]=implode('&', $params);
 				}
-				$curlOptions[CURLOPT_POSTFIELDS]=implode('&', $params);
 			}
-			if (!empty($postHeaders)) {
-				foreach ($postHeaders as $headerKey=>$headerValue) {
-					$postHeaders[]="$headerKey:$headerValue";
-					unset ($postHeaders[$headerKey]);
+			if ($hasBody || $method=='POST') {
+				if (!empty($postHeaders)) {
+					foreach ($postHeaders as $headerKey=>$headerValue) {
+						$postHeaders[]="$headerKey:$headerValue";
+						unset ($postHeaders[$headerKey]);
+					}
+					$curlOptions[CURLOPT_HTTPHEADER]=$postHeaders;//10023
 				}
-				$curlOptions[CURLOPT_HTTPHEADER]=$postHeaders;//10023
+			} else if (!empty($settings['getHeaders']) && in_array($method,['GET','HEAD','OPTIONS'])) {
+				$getHeaders=$settings['getHeaders'];
+				foreach ($getHeaders as $headerKey=>$headerValue) {
+						$getHeaders[]="$headerKey:$headerValue";
+						unset ($getHeaders[$headerKey]);
+					}
+				$curlOptions[CURLOPT_HTTPHEADER]=$getHeaders;//10023
 			}
+			if ($method=='POST') {
+				$curlOptions[CURLOPT_POST]=true;
+			} else if ($method!='GET') {
+				$curlOptions[CURLOPT_CUSTOMREQUEST]=$method;
+			} else if ($hasBody) {
+				$curlOptions[CURLOPT_CUSTOMREQUEST]=$method;
+			}
+		} else if (isset($formdata)) {
+				$curlOptions[CURLOPT_POST]=true;
+				if ($settings['jsonPayload']??null) {
+					$jsonData=json_encode($formdata);
+					$curlOptions[CURLOPT_POSTFIELDS]=$jsonData;
+					$postHeaders=['Content-Type'=>'application/json','Content-Length'=>strlen($jsonData)]+$postHeaders;
+				} else {
+					foreach ($formdata as $key => $value) {
+						$params[] = $key . '=' . urlencode($value);
+					}
+					$curlOptions[CURLOPT_POSTFIELDS]=implode('&', $params);
+				}
+				if (!empty($postHeaders)) {
+					foreach ($postHeaders as $headerKey=>$headerValue) {
+						$postHeaders[]="$headerKey:$headerValue";
+						unset ($postHeaders[$headerKey]);
+					}
+					$curlOptions[CURLOPT_HTTPHEADER]=$postHeaders;//10023
+				}
 		} else if (!empty($settings['getHeaders'])) {
-			$getHeaders=$settings['getHeaders'];
-			foreach ($getHeaders as $headerKey=>$headerValue) {
-					$getHeaders[]="$headerKey:$headerValue";
-					unset ($getHeaders[$headerKey]);
-				}
-			$curlOptions[CURLOPT_HTTPHEADER]=$getHeaders;//10023
+				$getHeaders=$settings['getHeaders'];
+				foreach ($getHeaders as $headerKey=>$headerValue) {
+						$getHeaders[]="$headerKey:$headerValue";
+						unset ($getHeaders[$headerKey]);
+					}
+				$curlOptions[CURLOPT_HTTPHEADER]=$getHeaders;//10023
 		}
 		//By resetting the settings like this it suffices to write settings to $curlOptions depending on what is
 		//*set* in $settings. We don't have to negate effects of settings that are *not set* in $setting
