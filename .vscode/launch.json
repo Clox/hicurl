@@ -1,0 +1,23 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Listen for Xdebug",
+			"type": "php",
+			"request": "launch",
+			"port": 9003, // was using 9003 before which is the new standard but xdebug in laradock uses 9000
+			"runtimeExecutable": "php",
+			/* Something like this is needed in the php.ini settings (should be /opt/lampp/etc/php.ini):
+				zend_extension="/home/oscar/Downloads/xdebug-3.0.4/xdebug-3.0.4/.libs/xdebug.so"
+				xdebug.remote_enable=1
+				xdebug.mode=debug
+				xdebug.start_with_request=yes
+			*/
+			"log": true,
+			"stopOnEntry": false, // set this to true when trying to figure out why xdebug isnt running!
+			"pathMappings": {
+				"/var/www": "${workspaceFolder}"
+			}
+		}
+	]
+}
