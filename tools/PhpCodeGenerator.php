@@ -30,12 +30,14 @@ class PhpCodeGenerator
             }
         }
 
-        $code = '$hicurl = new Hicurl(' . self::formatArray($settings) . ");\n\n";
+        $code = "\$hicurl = new Hicurl();\n\n";
+        $code .= '$settings = ' . self::formatArray($settings) . ";\n";
+        $code .= '$history = ' . self::formatArray($history) . ";\n\n";
         $code .= "\$response = \$hicurl->loadSingle(\n";
         $code .= "\t" . self::exportString($requestSpec['url']) . ",\n";
         $code .= "\t" . $bodyCode . ",\n";
-        $code .= "\t[],\n";
-        $code .= "\t" . self::formatArray($history, 2) . "\n";
+        $code .= "\t\$settings,\n";
+        $code .= "\t\$history\n";
         $code .= ");\n";
 
         return $code;

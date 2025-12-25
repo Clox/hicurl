@@ -3,10 +3,21 @@ $methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 $method = $requestSpec['method'];
 $settings = $requestSpec['settings'];
 $history = $requestSpec['history'];
+$includeCookies = isset($includeCookies) ? (bool)$includeCookies : (bool)$requestSpec['hasCookies'];
+$curlInput = isset($curlInput) ? (string)$curlInput : '';
 ?>
 
 <h1>Hicurl Request Workbench</h1>
 <form method="post">
+	<div>
+		<label for="curl_input">Paste cURL command</label><br>
+		<textarea id="curl_input" name="curl_input" style="width:100%;height:140px;font-family:monospace;"><?= htmlspecialchars($curlInput, ENT_QUOTES) ?></textarea>
+	</div>
+
+	<div>
+		<button type="submit" name="action" value="import_curl" formnovalidate>Import cURL</button>
+	</div>
+
 	<div>
 		<label for="url">URL</label><br>
 		<input type="text" id="url" name="url" value="<?= htmlspecialchars($requestSpec['url'], ENT_QUOTES) ?>" required style="width:100%;">
@@ -25,6 +36,12 @@ $history = $requestSpec['history'];
 		<label for="headers">Headers (one per line: Header: value)</label><br>
 		<textarea id="headers" name="headers" style="width:100%;height:120px;font-family:monospace;"><?= htmlspecialchars($requestSpec['headersRaw'], ENT_QUOTES) ?></textarea>
 	</div>
+
+	<?php if (!empty($requestSpec['hasCookies'])): ?>
+		<div>
+			<label><input type="checkbox" name="include_cookies" <?= $includeCookies ? 'checked' : '' ?>> Include cookies</label>
+		</div>
+	<?php endif; ?>
 
 	<div>
 		<label for="body">Body</label><br>
@@ -47,7 +64,7 @@ $history = $requestSpec['history'];
 	</div>
 
 	<div>
-		<button type="submit">Send Request</button>
+		<button type="submit" name="action" value="execute">Execute request</button>
 	</div>
 </form>
 <hr>

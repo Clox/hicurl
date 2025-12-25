@@ -21,19 +21,38 @@ class TestController
                 'enabled' => true,
                 'name' => null,
             ],
+            'hasCookies' => false,
         ];
     }
 
     public function handle(array $post): array
     {
+        $action = $post['action'] ?? null;
+
+        if ($action === 'import_curl') {
+            $curlInput = isset($post['curl_input']) ? (string)$post['curl_input'] : '';
+            $requestSpec = CurlImporter::fromCurl($curlInput);
+
+            return [
+                'requestSpec' => $requestSpec,
+                'result' => null,
+                'phpCode' => null,
+                'includeCookies' => $requestSpec['hasCookies'],
+            ];
+        }
+
         $requestSpec = $this->buildRequestSpec($post);
-        $result = $this->execute($requestSpec);
-        $phpCode = PhpCodeGenerator::fromRequestSpec($requestSpec);
+        $includeCookies = isset($post['include_cookies']);
+        $finalRequestSpec = $this->applyCookiePreference($requestSpec, $includeCookies);
+
+        $result = $this->execute($finalRequestSpec);
+        $phpCode = PhpCodeGenerator::fromRequestSpec($finalRequestSpec);
 
         return [
             'requestSpec' => $requestSpec,
             'result' => $result,
             'phpCode' => $phpCode,
+            'includeCookies' => $includeCookies,
         ];
     }
 
@@ -51,17 +70,20 @@ class TestController
             'xpath' => $this->normalizeXpath($xpathInput),
         ];
 
+        $headers = $this->parseHeaders($headersRaw);
+
         return [
             'url' => isset($post['url']) ? (string)$post['url'] : '',
             'method' => isset($post['method']) ? strtoupper((string)$post['method']) : 'GET',
             'headersRaw' => $headersRaw,
-            'headers' => $this->parseHeaders($headersRaw),
+            'headers' => $headers,
             'body' => isset($post['body']) ? (string)$post['body'] : '',
             'settings' => $settings,
             'history' => [
                 'enabled' => isset($post['history_enabled']),
                 'name' => $historyName !== '' ? $historyName : null,
             ],
+            'hasCookies' => $this->containsCookieHeader($headersRaw),
         ];
     }
 
@@ -116,6 +138,55 @@ class TestController
             $headers[$name] = $value;
         }
         return $headers;
+    }
+
+    private function containsCookieHeader(string $headersRaw): bool
+    {
+        $lines = preg_split("/\r\n|\n|\r/", $headersRaw) ?: [];
+        foreach ($lines as $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+            [$name] = array_map('trim', explode(':', $line, 2)) + [1 => ''];
+            if ($name !== '' && strcasecmp($name, 'cookie') === 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function applyCookiePreference(array $requestSpec, bool $includeCookies): array
+    {
+        if ($includeCookies) {
+            return $requestSpec;
+        }
+
+        $filteredHeaders = [];
+        foreach ($requestSpec['headers'] as $name => $value) {
+            if (strcasecmp($name, 'cookie') === 0) {
+                continue;
+            }
+            $filteredHeaders[$name] = $value;
+        }
+
+        $filteredHeaderLines = [];
+        $headerLines = preg_split("/\r\n|\n|\r/", $requestSpec['headersRaw']) ?: [];
+        foreach ($headerLines as $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+            [$name] = array_map('trim', explode(':', $line, 2)) + [1 => ''];
+            if ($name !== '' && strcasecmp($name, 'cookie') === 0) {
+                continue;
+            }
+            $filteredHeaderLines[] = $line;
+        }
+
+        $requestSpec['headers'] = $filteredHeaders;
+        $requestSpec['headersRaw'] = implode("\n", $filteredHeaderLines);
+        $requestSpec['hasCookies'] = false;
+
+        return $requestSpec;
     }
 
     private function normalizeXpath(string $rawXpath): array

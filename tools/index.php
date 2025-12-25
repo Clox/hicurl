@@ -13,6 +13,7 @@ if (!class_exists('Hicurl', false)) {
 }
 
 require_once __DIR__ . '/PhpCodeGenerator.php';
+require_once __DIR__ . '/CurlImporter.php';
 require_once __DIR__ . '/TestController.php';
 
 $controller = new TestController();
@@ -22,10 +23,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $requestSpec = $result['requestSpec'];
     $responseData = $result['result'];
     $generatedCode = $result['phpCode'];
+    $includeCookies = $result['includeCookies'] ?? false;
+    $curlInput = $_POST['curl_input'] ?? '';
 } else {
     $requestSpec = $controller->getInitialRequestSpec();
     $responseData = null;
     $generatedCode = null;
+    $includeCookies = $requestSpec['hasCookies'];
+    $curlInput = '';
 }
 
 echo "<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset=\"utf-8\">\n\t<title>Hicurl Tools</title>\n</head>\n<body>\n";
