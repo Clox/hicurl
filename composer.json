@@ -15,6 +15,9 @@
     "require": {
     },
     "autoload": {
+        "classmap": [
+            "src/hicurl.php"
+        ],
         "psr-0": {
         }
     }
